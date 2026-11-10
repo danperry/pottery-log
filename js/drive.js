@@ -1,6 +1,12 @@
-/* Google sign-in (Google Identity Services token model) and Google Drive REST helpers.
+/* Google sign-in (through the Pottery Log auth Worker) and Google Drive REST helpers.
  * Uses only the https://www.googleapis.com/auth/drive.file scope, so the app can
- * see and change only the files it created itself.
+ * see and change only the files it created itself, or folders the user picked.
+ *
+ * Sign-in: the app sends the browser to the Worker's /auth/start, Google asks for
+ * consent, and the Worker redirects back with an encrypted refresh token ("blob") in
+ * the URL fragment. The blob is kept in IndexedDB and is useless without the Worker's
+ * key. Access tokens are fetched from the Worker's /auth/token when needed and kept
+ * in memory only, so the user signs in once and stays connected.
  *
  * The user picks the backup folder: either an existing folder chosen with the
  * Google Picker (which grants this app access to just that folder) or a new
@@ -11,41 +17,26 @@
 (function () {
   'use strict';
 
-  const SCOPE = 'https://www.googleapis.com/auth/drive.file';
-  const GIS_SRC = 'https://accounts.google.com/gsi/client';
   const GAPI_SRC = 'https://apis.google.com/js/api.js';
   const FOLDER_MIME = 'application/vnd.google-apps.folder';
   const API = 'https://www.googleapis.com/drive/v3';
   const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
-  const TOKEN_KEY = 'potteryLog.driveToken';
   const ACCOUNT_KEY = 'potteryLog.driveAccount';
   const FOLDER_KEY = 'potteryLog.driveFolder';
+  const RECONNECT_KEY = 'potteryLog.driveReconnect';
+  const REFRESH_MARGIN = 5 * 60 * 1000; // renew access tokens 5 minutes before they expire
 
   const cfg = window.POTTERY_CONFIG || {};
+  const workerUrl = (cfg.authWorkerUrl || '').trim().replace(/\/+$/, '');
   const clientId = (cfg.googleClientId || '').trim();
   const apiKey = (cfg.googleApiKey || '').trim();
   // The Picker's app ID is the Cloud project number, which is the client ID's numeric prefix.
   const appId = (String(cfg.googleAppId || '').trim() || (clientId.match(/^(\d+)-/) || [])[1] || '');
 
-  let gisPromise = null;
   let pickerPromise = null;
-  let tokenClient = null;
-  let pending = null; // { resolve, reject } for the in-flight token request
-
-  function loadGis() {
-    if (gisPromise) return gisPromise;
-    gisPromise = new Promise((resolve, reject) => {
-      if (window.google && google.accounts && google.accounts.oauth2) return resolve();
-      const s = document.createElement('script');
-      s.src = GIS_SRC;
-      s.async = true;
-      s.defer = true;
-      s.onload = () => resolve();
-      s.onerror = () => { gisPromise = null; reject(new Error('Could not load Google sign-in. Check your connection.')); };
-      document.head.appendChild(s);
-    });
-    return gisPromise;
-  }
+  let blob = null;          // encrypted refresh token, mirrored from IndexedDB by init()
+  let access = null;        // { token, expiresAt } in memory only
+  let refreshing = null;    // in-flight /auth/token request
 
   function loadPicker() {
     if (pickerPromise) return pickerPromise;
@@ -63,44 +54,11 @@
     return pickerPromise;
   }
 
-  function initClient() {
-    if (tokenClient) return tokenClient;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SCOPE,
-      callback: (resp) => {
-        const p = pending; pending = null;
-        if (!p) return;
-        if (resp.error) return p.reject(new Error(resp.error_description || resp.error));
-        if (!google.accounts.oauth2.hasGrantedAllScopes(resp, SCOPE)) {
-          return p.reject(new Error('Google Drive access was not granted.'));
-        }
-        const token = { value: resp.access_token, expires: Date.now() + (Number(resp.expires_in) - 60) * 1000 };
-        try { localStorage.setItem(TOKEN_KEY, JSON.stringify(token)); } catch (e) { /* ignore */ }
-        p.resolve(token.value);
-      },
-      error_callback: (err) => {
-        const p = pending; pending = null;
-        if (!p) return;
-        const msg = err && err.type === 'popup_closed' ? 'Sign-in was cancelled.'
-          : err && err.type === 'popup_failed_to_open' ? 'The sign-in popup was blocked. Allow popups for this site and try again.'
-          : 'Sign-in failed.';
-        p.reject(new Error(msg));
-      },
-    });
-    return tokenClient;
-  }
-
-  function storedToken() {
+  function flag(key, val) {
     try {
-      const t = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null');
-      if (t && t.value && t.expires > Date.now()) return t.value;
-    } catch (e) { /* ignore */ }
-    return null;
-  }
-
-  function clearToken() {
-    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+      if (val === undefined) return localStorage.getItem(key) === '1';
+      if (val) localStorage.setItem(key, '1'); else localStorage.removeItem(key);
+    } catch (e) { return false; }
   }
 
   function getAccount() {
@@ -114,28 +72,57 @@
     } catch (e) { /* ignore */ }
   }
 
-  /**
-   * Get an access token. Must be called directly from a user gesture (click) when
-   * no valid token is cached, because it may open Google's popup.
-   */
-  function getToken(interactive) {
-    const t = storedToken();
-    if (t) return Promise.resolve(t);
-    if (!clientId) return Promise.reject(new Error('Google sign-in is not configured.'));
-    if (!(window.google && google.accounts && google.accounts.oauth2)) {
-      return loadGis().then(() => getToken(interactive));
+  /** Thrown when Google no longer accepts the saved sign-in; the user must reconnect. */
+  class ReconnectError extends Error {
+    constructor() {
+      super('Google Drive needs to be reconnected.');
+      this.name = 'ReconnectError';
+      this.reconnect = true;
     }
-    initClient();
-    return new Promise((resolve, reject) => {
-      if (pending) pending.reject(new Error('Superseded'));
-      pending = { resolve, reject };
-      const acct = getAccount();
-      const opts = {};
-      if (acct && acct.email) opts.login_hint = acct.email;
-      // First sign-in shows the consent screen; later ones usually just flash the popup.
-      opts.prompt = interactive === 'consent' || !acct ? 'consent' : '';
-      tokenClient.requestAccessToken(opts);
-    });
+  }
+
+  async function forgetSignIn() {
+    blob = null;
+    access = null;
+    await DB.setAuthBlob(null);
+  }
+
+  async function workerPost(path, body) {
+    let res;
+    try {
+      res = await fetch(workerUrl + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        credentials: 'omit',
+        cache: 'no-store',
+      });
+    } catch (e) {
+      throw new Error('Could not reach the sign-in service. Check your connection.');
+    }
+    const j = await res.json().catch(() => ({}));
+    return { res, j };
+  }
+
+  async function fetchAccessToken() {
+    if (!blob) throw new ReconnectError();
+    const { res, j } = await workerPost('/auth/token', { blob });
+    if (res.status === 401 && j.error === 'invalid_grant') {
+      // Revoked, unused for 6 months, or the key changed: drop it, keep all local data.
+      await forgetSignIn();
+      flag(RECONNECT_KEY, true);
+      throw new ReconnectError();
+    }
+    if (!res.ok || !j.access_token) throw new Error('Google sign-in service error (' + res.status + '). Try again later.');
+    access = { token: j.access_token, expiresAt: Number(j.expires_at) || Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+    return access.token;
+  }
+
+  /** A valid access token, renewed through the Worker when missing or close to expiry. */
+  function getToken() {
+    if (access && access.expiresAt - Date.now() > REFRESH_MARGIN) return Promise.resolve(access.token);
+    if (!refreshing) refreshing = fetchAccessToken().finally(() => { refreshing = null; });
+    return refreshing;
   }
 
   async function api(path, opts = {}, retry = true) {
@@ -145,7 +132,7 @@
       headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
     });
     if (res.status === 401 && retry) {
-      clearToken();
+      access = null;
       return api(path, opts, false);
     }
     if (!res.ok) {
@@ -223,33 +210,67 @@
   }
 
   const Drive = {
-    configured: !!clientId,
+    configured: !!workerUrl,
     getAccount,
-    isSignedIn: () => !!getAccount(),
-    hasToken: () => !!storedToken(),
-    preload: () => (clientId ? loadGis().catch(() => {}) : Promise.resolve()),
+    isSignedIn: () => !!blob,
+    needsReconnect: () => !blob && flag(RECONNECT_KEY),
+    ReconnectError,
 
-    /** Interactive sign-in. Call from a click handler. */
-    async signIn() {
-      await getToken('consent');
-      const res = await api('/about?fields=user(displayName,emailAddress)');
-      const j = await res.json();
-      const acct = { name: j.user && j.user.displayName, email: j.user && j.user.emailAddress };
-      setAccount(acct);
-      return acct;
+    /**
+     * Load the saved sign-in, and finish a sign-in that just returned from the Worker.
+     * Returns { connected: true } or { error } when the page was opened by a sign-in redirect.
+     */
+    async init() {
+      let result = null;
+      const m = location.hash.match(/^#(auth|auth_error)=([^&]*)/);
+      if (m) {
+        // Take the blob out of the address bar (and history) right away.
+        history.replaceState(null, '', location.pathname + location.search + '#/backup');
+        if (m[1] === 'auth' && m[2].startsWith('v1.')) {
+          await DB.setAuthBlob(m[2]);
+          flag(RECONNECT_KEY, false);
+          result = { connected: true };
+        } else {
+          result = { error: decodeURIComponent(m[2] || 'unknown') };
+        }
+      }
+      try { blob = await DB.getAuthBlob(); } catch (e) { blob = null; }
+      // Earlier versions kept short-lived tokens in localStorage; never keep tokens there.
+      try { localStorage.removeItem('potteryLog.driveToken'); } catch (e) { /* ignore */ }
+      // Signed in with an earlier version (no saved blob): ask to reconnect once.
+      if (!blob && getAccount() && !result) flag(RECONNECT_KEY, true);
+      if (result && result.connected && blob) {
+        try {
+          const res = await api('/about?fields=user(displayName,emailAddress)');
+          const j = await res.json();
+          setAccount({ name: j.user && j.user.displayName, email: j.user && j.user.emailAddress });
+        } catch (e) {
+          if (!(e && e.reconnect)) setAccount({ name: 'Google account' });
+        }
+      }
+      return result;
     },
 
-    async signOut() {
-      const t = storedToken();
-      clearToken();
+    /** Leave the app for Google's consent screen (via the Worker). */
+    signIn() {
+      location.assign(workerUrl + '/auth/start');
+    },
+
+    /** Revoke access with Google and forget the saved sign-in on this device. */
+    async disconnect() {
+      const b = blob;
+      await forgetSignIn();
       setAccount(null);
       setFolderChoice(null);
-      if (t && window.google && google.accounts && google.accounts.oauth2) {
-        try { google.accounts.oauth2.revoke(t, () => {}); } catch (e) { /* ignore */ }
+      flag(RECONNECT_KEY, false);
+      if (b) {
+        const { res } = await workerPost('/auth/revoke', { blob: b }).catch(() => ({ res: { ok: false } }));
+        if (!res.ok) return { revoked: false };
       }
+      return { revoked: true };
     },
 
-    /** Make sure we have a token; call first thing in a click handler so any popup is allowed. */
+    /** Get a usable access token (renewing it if needed). */
     ensureToken: () => getToken(),
 
     /** The folder backups go to, as { id, name }, or null if none is chosen yet. */
@@ -292,7 +313,7 @@
     /**
      * Show the Google Picker so the user can choose an existing folder. Picking it grants
      * this app (drive.file scope) access to that folder. Resolves to { id, name } or null
-     * if cancelled. Call ensureToken() first, from the click handler.
+     * if cancelled.
      */
     async pickFolder() {
       if (!apiKey) throw new Error('To choose an existing folder, add a Google API key to js/config.js (see the README). You can still create a new folder.');
