@@ -11,6 +11,7 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 
 ```
 index.html               App shell and view templates
+privacy.html             Privacy policy (link it on the OAuth consent screen)
 css/styles.css           Styles (light and dark)
 js/config.js             Your Google OAuth client ID and API key go here
 js/db.js                 IndexedDB storage (pieces + photos)
@@ -56,7 +57,7 @@ In the current console this is under **Google Auth Platform** (older consoles ca
    `https://www.googleapis.com/auth/drive.file` ("See, edit, create, and delete only the specific Google Drive files you use with this app"). It is a *non-sensitive* scope, so no Google verification is needed for it.
 4. **Test users:** while the app's publishing status is **Testing**, only listed accounts can sign in. Add your own Google account (and anyone else who'll use it, up to 100).
 
-> **Testing vs. production.** In *Testing* mode Google shows an "unverified app" warning and may expire a user's consent after 7 days, so you'd occasionally sign in again. To remove that, go to **Audience** and click **Publish app**. Because `drive.file` is non-sensitive, publishing doesn't require a security review; Google may ask you to confirm the app's branding (a home page and privacy policy link). For personal use, staying in Testing is fine.
+> **Testing vs. production.** In *Testing* mode Google shows an "unverified app" warning and may expire a user's consent after 7 days, so you'd occasionally sign in again. To remove that, go to **Audience** and click **Publish app**. Because `drive.file` is non-sensitive, publishing doesn't require a security review; Google may ask you to confirm the app's branding: use the app's URL as the home page and `…/pottery-log/privacy.html` as the privacy policy link (see [Privacy](#privacy)). For personal use, staying in Testing is fine.
 
 ### 4. Create the OAuth client ID
 
@@ -133,3 +134,5 @@ When you change any file, bump `VERSION` in `sw.js` so installed copies refresh 
 ## Privacy
 
 There's no server. Pieces and photos stay in your browser's storage on your device, and in your own Google Drive if you back up. The app never sees the rest of your Drive.
+
+The full policy is in [`privacy.html`](privacy.html), served at `https://<your-username>.github.io/pottery-log/privacy.html`. Use that URL as the **Privacy policy link** on the OAuth consent screen (Google Auth Platform → **Branding**). The home page link is `https://<your-username>.github.io/pottery-log/`.
