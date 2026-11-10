@@ -12,7 +12,7 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 ```
 index.html               App shell and view templates
 css/styles.css           Styles (light and dark)
-js/config.js             Your Google OAuth client ID goes here
+js/config.js             Your Google OAuth client ID and API key go here
 js/db.js                 IndexedDB storage (pieces + photos)
 js/drive.js              Google sign-in and Drive API calls
 js/app.js                Views, routing, photo handling, backup/restore
@@ -40,10 +40,11 @@ The app works fully without this; you only need it for Drive backup. You do it o
 1. Go to <https://console.cloud.google.com/> and sign in.
 2. Use the project picker at the top → **New project**. Name it e.g. `Pottery Log` and create it. Make sure it's selected.
 
-### 2. Enable the Google Drive API
+### 2. Enable the Google Drive and Google Picker APIs
 
 1. Go to **APIs & Services → Library**.
 2. Search for **Google Drive API**, open it, and click **Enable**.
+3. Search for **Google Picker API**, open it, and click **Enable**. The app uses Google's folder picker so you can choose an existing Drive folder for backups.
 
 ### 3. Configure the OAuth consent screen
 
@@ -67,29 +68,46 @@ In the current console this is under **Google Auth Platform** (older consoles ca
 4. **Authorized redirect URIs:** leave empty. The app uses the Google Identity Services popup token flow, which doesn't need one.
 5. Click **Create** and copy the **Client ID** (it ends in `.apps.googleusercontent.com`). You don't need the client secret; a browser app must never use one.
 
-### 5. Put the client ID in the app
+### 5. Create an API key for the folder picker
+
+The Google Picker needs an API key alongside the OAuth client. You can skip this step if you only ever want the app to create new backup folders; **Choose folder** then won't work.
+
+1. Go to **APIs & Services → Credentials → Create credentials → API key**, and copy the key (it starts with `AIza`).
+2. Open the key with **Edit API key** and restrict it:
+   - **Application restrictions:** *Websites*, and add `https://<your-username>.github.io/*` (plus `http://localhost:8000/*` for local testing).
+   - **API restrictions:** *Restrict key* and select only **Google Picker API**.
+3. Save.
+
+### 6. Put the IDs in the app
 
 Edit `js/config.js`:
 
 ```js
 window.POTTERY_CONFIG = {
   googleClientId: '1234567890-abc123def456.apps.googleusercontent.com',
+  googleApiKey: 'AIzaSy...your-key...',
+  googleAppId: '', // leave empty; it's the number at the start of the client ID
 };
 ```
 
-Commit and push. A client ID is public by design (it's visible in every page that uses Google sign-in), so it's fine in a public repo. It only works from the origins you listed in step 4.
+Commit and push. The client ID and API key are public by design: they're visible in every page that uses Google sign-in or the Picker. They're fine in a public repo, because they only work from the sites you allowed in steps 4 and 5. `googleAppId` is your Cloud project number. The app reads it from the start of the client ID, so you only need to fill it in if your client ID doesn't start with that number. The Picker uses it so that picking a folder grants the app access to that folder.
 
-Origin changes can take a few minutes to take effect on Google's side. If you see `Error 400: origin_mismatch` or `redirect_uri_mismatch`, double-check the origin in step 4 exactly matches the address bar (https, no path).
+Origin changes can take a few minutes to take effect on Google's side. If you see `Error 400: origin_mismatch` or `redirect_uri_mismatch`, double-check the origin in step 4 exactly matches the address bar (https, no path). If the folder picker says "The API developer key is invalid", check that the key's website restriction includes your site and that the Google Picker API is enabled.
 
 ## Using backup and restore
 
 Tap the cloud icon in the top bar.
 
 - **Sign in with Google** opens Google's popup. Grant access to "the specific Google Drive files you use with this app".
-- **Back up now** creates a `Pottery Log` folder in your Drive containing `pottery-log.json` (all piece details) and one JPEG per photo. Later backups upload only new photos, rewrite the JSON, and remove photos of deleted pieces. A backup is a snapshot of this device: if Drive holds a newer backup from a different device, the app warns you before overwriting it.
-- **Restore from Drive** replaces the pieces on this device with the ones in the backup, downloading any photos that aren't already here.
+- **Backup folder** shows where backups go. Set it before your first backup:
+  - **Choose folder** opens Google's folder picker. Pick any folder in My Drive or a shared drive. Picking it gives the app access to that one folder, and nothing else in your Drive.
+  - **New folder** creates a folder with the name you type (default `Pottery Log`) at the top of My Drive.
+- **Back up now** writes `pottery-log.json` (all piece details) and one JPEG per photo into the backup folder. Later backups upload only new photos, rewrite the JSON, and remove photos of deleted pieces. The app only ever touches files it created, so other files you keep in that folder are left alone. A backup is a snapshot of this device: if the folder holds a newer backup from a different device, the app warns you before overwriting it.
+- **Restore from Drive** replaces the pieces on this device with the backup in the chosen folder, downloading any photos that aren't already here.
 
-To move to a new phone: back up on the old one, then install the app on the new one, sign in, and restore.
+If you change the backup folder, the next backup copies everything into the new folder. The old folder is left as it was.
+
+To move to a new phone: back up on the old one. Then install the app on the new one, sign in, use **Choose folder** to pick the same folder, and restore.
 
 Google access tokens last about an hour and the app keeps them only for the browser session, so you may see Google's popup flash briefly when you back up later. If popups are blocked, allow them for your github.io site.
 

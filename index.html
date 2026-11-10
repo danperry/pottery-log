@@ -179,6 +179,30 @@
         </div>
         <div id="driveSignedIn" hidden>
           <p class="account" id="accountLabel"></p>
+          <div class="folder-box">
+            <div class="folder-row">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+              <div class="folder-text">
+                <span class="muted small">Backup folder</span>
+                <strong id="folderLabel">Not chosen yet</strong>
+              </div>
+            </div>
+            <div class="folder-actions">
+              <button class="btn btn-secondary btn-small" id="pickFolderBtn">Choose folder</button>
+              <button class="btn btn-ghost btn-small" id="newFolderBtn">New folder</button>
+            </div>
+            <form class="new-folder" id="newFolderForm" hidden>
+              <label class="field">
+                <span>New folder name</span>
+                <input id="newFolderName" maxlength="120" value="Pottery Log" autocomplete="off">
+              </label>
+              <p class="muted small" id="newFolderWhere">It will be created at the top of My Drive.</p>
+              <div class="folder-actions">
+                <button type="submit" class="btn btn-primary btn-small">Create</button>
+                <button type="button" class="btn btn-ghost btn-small" id="newFolderCancel">Cancel</button>
+              </div>
+            </form>
+          </div>
           <p class="muted small" id="lastBackupLabel"></p>
           <div class="progress" id="driveProgress" hidden><div class="progress-bar" id="driveProgressBar"></div><span id="driveProgressText"></span></div>
           <div class="btn-col">
