@@ -76,7 +76,7 @@
           return p.reject(new Error('Google Drive access was not granted.'));
         }
         const token = { value: resp.access_token, expires: Date.now() + (Number(resp.expires_in) - 60) * 1000 };
-        try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify(token)); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(TOKEN_KEY, JSON.stringify(token)); } catch (e) { /* ignore */ }
         p.resolve(token.value);
       },
       error_callback: (err) => {
@@ -93,14 +93,14 @@
 
   function storedToken() {
     try {
-      const t = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || 'null');
+      const t = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null');
       if (t && t.value && t.expires > Date.now()) return t.value;
     } catch (e) { /* ignore */ }
     return null;
   }
 
   function clearToken() {
-    try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
   }
 
   function getAccount() {

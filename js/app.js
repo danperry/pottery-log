@@ -18,6 +18,9 @@
   const LAST_BACKUP_KEY = 'potteryLog.lastBackup';
   const DEVICE_KEY = 'potteryLog.deviceId';
   const FILTER_KEY = 'potteryLog.filter';
+  const AUTO_KEY = 'potteryLog.autoBackup';
+  const CHANGE_KEY = 'potteryLog.changeSeq';   // bumped on every local change
+  const BACKED_KEY = 'potteryLog.backedSeq';   // change number covered by the last backup
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const app = $('#app');
@@ -304,10 +307,12 @@
       adv.hidden = false;
       adv.textContent = 'Mark as ' + next.label.toLowerCase();
       adv.onclick = async () => {
+        prepareAutoBackup();
         p.stage = next.id;
         if (!p[next.date]) p[next.date] = today();
         p.updatedAt = Date.now();
         await DB.putPiece(p);
+        markChanged();
         toast('Moved to ' + next.label);
         route();
       };
@@ -331,7 +336,9 @@
     $('#editBtn').onclick = () => nav('#/edit/' + encodeURIComponent(p.id));
     $('#deleteBtn').onclick = async () => {
       if (!confirm('Delete "' + (p.title || 'Untitled') + '" and its photos? This cannot be undone.')) return;
+      prepareAutoBackup();
       await DB.deletePiece(p.id);
+      markChanged();
       toast('Piece deleted');
       nav('#/', true);
     };
@@ -466,6 +473,7 @@
       if (glazeInput.value.trim()) addGlaze();
       const title = f.title.value.trim();
       if (!title) { toast('Give the piece a title'); f.title.focus(); return; }
+      prepareAutoBackup();
       piece.title = title;
       piece.clayBody = f.clayBody.value.trim();
       piece.method = (form.querySelector('input[name=method]:checked') || {}).value || '';
@@ -480,6 +488,7 @@
       const kept = new Set(piece.photoIds);
       const removed = [...originalPhotos, ...addedPhotos].filter((pid) => !kept.has(pid));
       await DB.deletePhotos(removed);
+      markChanged();
       toast(isNew ? 'Piece added' : 'Saved');
       DB.requestPersistence();
       if (isNew) nav('#/piece/' + encodeURIComponent(piece.id), true);
@@ -516,11 +525,12 @@
       const folder = Drive.getFolder();
       $('#folderLabel').textContent = folder ? folder.name : 'Not chosen yet';
       $('#pickFolderBtn').textContent = folder ? 'Change folder' : 'Choose folder';
+      $('#autoBackupToggle').checked = store(AUTO_KEY) === true;
       const last = store(LAST_BACKUP_KEY);
-      const newest = pieces.reduce((m, p) => Math.max(m, p.updatedAt || 0), 0);
-      let label = last ? 'Last backup: ' + fmtDateTime(last.at) : 'Not backed up yet from this device.';
-      if (last && newest > last.at) label += ' You have changes since then.';
+      let label = last ? 'Last backup: ' + fmtDateTime(last.at) + '.' : 'Not backed up yet from this device.';
+      if (last && isDirty()) label += ' You have changes since then.';
       $('#lastBackupLabel').textContent = label;
+      updateBadge();
     }
     draw();
 
@@ -534,11 +544,16 @@
       if (on) { ptext.textContent = text || ''; bar.style.width = Math.round((frac || 0) * 100) + '%'; }
     }
 
+    // Redraw when a background backup finishes while this page is open.
+    onBackupStateChange = draw;
+
     $('#signInBtn').addEventListener('click', async () => {
       try {
         await Drive.signIn();
+        store(AUTO_KEY, $('#autoBackupConnect').checked);
         draw();
-        toast('Connected to Google Drive');
+        toast(Drive.getFolder() ? 'Connected to Google Drive' : 'Connected. Now choose or create a backup folder.', 3500);
+        if (Drive.getFolder()) kickAutoBackup();
       } catch (err) {
         toast(err.message);
       }
@@ -553,7 +568,7 @@
       try {
         await Drive.ensureToken();
         const f = await Drive.pickFolder();
-        if (f) { draw(); toast('Backups will go to “' + f.name + '”'); }
+        if (f) { folderChanged(); draw(); toast('Backups will go to “' + f.name + '”'); kickAutoBackup(); }
       } catch (err) {
         toast(err.message, 4000);
       }
@@ -575,11 +590,23 @@
         const f = await Drive.createFolder(name);
         busy(false);
         newForm.hidden = true;
+        folderChanged();
         draw();
         toast('Created “' + f.name + '” in My Drive');
+        kickAutoBackup();
       } catch (err) {
         busy(false);
         toast(err.message, 4000);
+      }
+    });
+
+    $('#autoBackupToggle').addEventListener('change', (e) => {
+      store(AUTO_KEY, e.target.checked);
+      updateBadge();
+      if (e.target.checked) {
+        toast(Drive.getFolder() ? 'Will back up after every save' : 'Choose a backup folder to start backing up');
+        prepareAutoBackup();
+        kickAutoBackup();
       }
     });
 
@@ -592,7 +619,7 @@
     $('#backupBtn').addEventListener('click', async () => {
       try {
         await Drive.ensureToken(); // first, so a popup (if needed) belongs to this tap
-        await backup((t, f) => busy(true, t, f));
+        await queueTask(() => backup((t, f) => busy(true, t, f)));
         busy(false);
         draw();
         toast('Backed up to Google Drive');
@@ -606,7 +633,7 @@
     $('#restoreBtn').addEventListener('click', async () => {
       try {
         await Drive.ensureToken();
-        const n = await restore((t, f) => busy(true, t, f));
+        const n = await queueTask(() => restore((t, f) => busy(true, t, f)));
         busy(false);
         toast('Restored ' + n + (n === 1 ? ' piece' : ' pieces'));
         renderBackup();
@@ -620,7 +647,84 @@
 
   const NO_FOLDER = 'Choose or create a backup folder first.';
 
-  async function backup(onProgress) {
+  /* ---------- automatic backup ---------- */
+
+  let onBackupStateChange = null;
+  let tokenRequest = null;
+  let autoQueued = false;
+  let syncing = false;
+  let taskChain = Promise.resolve();
+
+  /** Run Drive tasks one at a time so manual and automatic backups never overlap. */
+  function queueTask(fn) {
+    const p = taskChain.then(fn, fn);
+    taskChain = p.catch(() => {});
+    return p;
+  }
+
+  const autoOn = () => Drive.configured && Drive.isSignedIn() && store(AUTO_KEY) === true;
+  const isDirty = () => (store(CHANGE_KEY) || 0) > (store(BACKED_KEY) || 0);
+
+  function updateBadge() {
+    const pending = Drive.configured && Drive.isSignedIn() && isDirty();
+    backupNavBtn.classList.toggle('dirty', pending && !syncing);
+    backupNavBtn.classList.toggle('syncing', syncing);
+    backupNavBtn.setAttribute('aria-label', syncing ? 'Backing up…'
+      : pending ? 'Backup and settings (changes not backed up)' : 'Backup and settings');
+  }
+
+  /** A new backup folder starts empty, so everything needs backing up again. */
+  function folderChanged() {
+    store(BACKED_KEY, 0);
+    if (!(store(CHANGE_KEY) > 0)) store(CHANGE_KEY, 1);
+    updateBadge();
+  }
+
+  function markChanged() {
+    store(CHANGE_KEY, (store(CHANGE_KEY) || 0) + 1);
+    updateBadge();
+    kickAutoBackup();
+  }
+
+  /**
+   * Call at the very start of a tap that changes data. Google access tokens last an hour;
+   * if ours has expired, getting a new one opens Google's popup (it closes by itself),
+   * and browsers only allow that popup during a tap.
+   */
+  function prepareAutoBackup() {
+    if (autoOn() && !Drive.hasToken() && !tokenRequest) {
+      tokenRequest = Drive.ensureToken().catch(() => null).finally(() => { tokenRequest = null; });
+    }
+  }
+
+  async function kickAutoBackup() {
+    if (!autoOn() || !isDirty() || autoQueued) return;
+    autoQueued = true;
+    if (tokenRequest) await tokenRequest;
+    return queueTask(async () => {
+      autoQueued = false;
+      if (!autoOn() || !isDirty() || !Drive.getFolder()) return;
+      if (!Drive.hasToken()) { updateBadge(); return; } // waits for the next tap or manual backup
+      syncing = true; updateBadge();
+      let ok = false;
+      try {
+        await backup(() => {}, { auto: true });
+        ok = true;
+        toast('Backed up to Google Drive', 1600);
+      } catch (err) {
+        toast('Automatic backup failed: ' + err.message, 5000);
+      } finally {
+        syncing = false; updateBadge();
+        if (onBackupStateChange && location.hash.startsWith('#/backup')) onBackupStateChange();
+      }
+      // Pick up changes made while uploading. After a failure, wait for the next save,
+      // launch or reconnect instead of retrying in a loop.
+      if (ok && isDirty()) kickAutoBackup();
+    });
+  }
+
+  async function backup(onProgress, opts = {}) {
+    const seq = store(CHANGE_KEY) || 0;
     onProgress('Checking backup folder…', 0.02);
     const chosen = await Drive.resolveFolder();
     if (!chosen) throw new Error(NO_FOLDER);
@@ -632,6 +736,7 @@
       onProgress('Checking existing backup…', 0.05);
       const remote = await Drive.readData(dataFile.id).catch(() => null);
       if (remote && remote.deviceId && remote.deviceId !== deviceId() && (!last || remote.exportedAt > last.at)) {
+        if (opts.auto) throw new Error('Drive has a newer backup from another device. Open Backup to choose what to keep.');
         const ok = confirm('Google Drive has a newer backup made on another device (' +
           fmtDateTime(remote.exportedAt) + ', ' + (remote.pieces || []).length + ' pieces).\n\n' +
           'Backing up now will replace it with this device\'s pieces. Continue?\n\n' +
@@ -665,6 +770,8 @@
     for (const [, fileId] of orphans) await Drive.deleteFile(fileId).catch(() => {});
 
     store(LAST_BACKUP_KEY, { at, pieces: pieces.length });
+    store(BACKED_KEY, Math.max(seq, store(BACKED_KEY) || 0));
+    updateBadge();
     onProgress('Done', 1);
   }
 
@@ -705,6 +812,8 @@
     onProgress('Saving…', 0.97);
     await DB.replaceAllPieces(pieces, available);
     store(LAST_BACKUP_KEY, { at: data.exportedAt, pieces: pieces.length });
+    store(BACKED_KEY, store(CHANGE_KEY) || 0); // device now matches the backup
+    updateBadge();
     onProgress('Done', 1);
     return pieces.length;
   }
@@ -713,6 +822,16 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  // Stay connected: load Google's sign-in script up front so a token refresh can happen
+  // inside a tap, and finish any backup that was pending when the app was last closed.
+  if (store(CHANGE_KEY) == null && !store(LAST_BACKUP_KEY)) store(CHANGE_KEY, 1); // data from before change tracking
+  updateBadge();
+  if (Drive.configured && Drive.isSignedIn()) {
+    Drive.preload();
+    kickAutoBackup();
+    window.addEventListener('online', kickAutoBackup);
+  }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
