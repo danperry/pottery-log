@@ -288,6 +288,7 @@ fieldset.field > legend { margin-bottom: 6px; }
 .muted { color: var(--muted); }
 .small { font-size: .88rem; }
 .center { text-align: center; }
+.center a { color: inherit; }
 .warn { background: var(--accent-soft); color: var(--accent); padding: 10px 12px; border-radius: 10px; }
 .warn code { font-size: .9em; }
 .account { font-weight: 600; margin: 12px 0 2px; overflow-wrap: anywhere; }
