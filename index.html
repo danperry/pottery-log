@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pottery Log</title>
+  <meta name="description" content="Log your pottery pieces from greenware to done.">
+  <meta name="theme-color" content="#a4552f">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" id="backBtn" aria-label="Back" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <h1 id="pageTitle">Pottery Log</h1>
+    <button class="icon-btn" id="backupNavBtn" aria-label="Backup and settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A3.8 3.8 0 0 1 17.5 18z" /><path d="M12 15V10m-2.5 2.5L12 10l2.5 2.5" /></svg>
+    </button>
+  </header>
+
+  <main id="app" tabindex="-1"></main>
+
+  <button class="fab" id="addBtn" aria-label="Add piece">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+  </button>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Templates -->
+  <template id="tpl-list">
+    <section class="list-view">
+      <div class="search-row">
+        <input type="search" id="searchInput" placeholder="Search title, clay, glaze, notes…" aria-label="Search pieces">
+      </div>
+      <div class="chips" id="stageFilter" role="tablist" aria-label="Filter by stage"></div>
+      <p class="count" id="countLabel"></p>
+      <ul class="cards" id="cardList"></ul>
+      <div class="empty" id="emptyState" hidden>
+        <div class="empty-pot" aria-hidden="true">
+          <svg viewBox="0 0 64 64"><path d="M22 10h20M24 10c0 6-10 10-10 24 0 12 8 20 18 20s18-8 18-20c0-14-10-18-10-24" /></svg>
+        </div>
+        <h2>No pieces yet</h2>
+        <p>Tap <strong>+</strong> to log your first piece.</p>
+      </div>
+    </section>
+  </template>
+
+  <template id="tpl-detail">
+    <article class="detail-view">
+      <div class="gallery" id="gallery"></div>
+      <div class="detail-body">
+        <div class="detail-head">
+          <h2 id="dTitle"></h2>
+          <span class="stage-pill" id="dStage"></span>
+        </div>
+        <ol class="stage-track" id="dTrack" aria-label="Stage progress"></ol>
+        <button class="btn btn-secondary btn-small" id="advanceBtn" hidden></button>
+        <dl class="facts" id="dFacts"></dl>
+        <div id="dNotesWrap" hidden>
+          <h3>Notes</h3>
+          <p class="notes" id="dNotes"></p>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-primary" id="editBtn">Edit</button>
+          <button class="btn btn-danger-ghost" id="deleteBtn">Delete</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-edit">
+    <form class="edit-view" id="editForm" novalidate>
+      <label class="field">
+        <span>Title</span>
+        <input name="title" required maxlength="120" placeholder="e.g. Tall speckled mug" autocomplete="off">
+      </label>
+
+      <div class="field">
+        <span>Photos</span>
+        <div class="photo-grid" id="photoGrid"></div>
+        <label class="btn btn-secondary btn-small photo-add">
+          <input type="file" accept="image/*" multiple id="photoInput" hidden>
+          Add photos
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Clay body</span>
+        <input name="clayBody" list="clayList" maxlength="120" placeholder="e.g. Speckled buff, cone 6" autocomplete="off">
+        <datalist id="clayList"></datalist>
+      </label>
+
+      <fieldset class="field">
+        <legend>Forming method</legend>
+        <div class="segmented">
+          <label><input type="radio" name="method" value="wheel"><span>Wheel</span></label>
+          <label><input type="radio" name="method" value="hand-built"><span>Hand-built</span></label>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <span id="glazeLabel">Glazes</span>
+        <div class="tags" id="glazeTags" aria-labelledby="glazeLabel"></div>
+        <div class="tag-input-row">
+          <input id="glazeInput" list="glazeList" placeholder="Add a glaze and press Enter" maxlength="120" autocomplete="off" aria-labelledby="glazeLabel">
+          <button type="button" class="btn btn-secondary btn-small" id="glazeAddBtn">Add</button>
+        </div>
+        <datalist id="glazeList"></datalist>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>Firing type</span>
+          <select name="firingType">
+            <option value="">—</option>
+            <option>Electric (oxidation)</option>
+            <option>Gas (reduction)</option>
+            <option>Gas (oxidation)</option>
+            <option>Raku</option>
+            <option>Wood</option>
+            <option>Soda</option>
+            <option>Salt</option>
+            <option>Pit / smoke</option>
+            <option>Other</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Cone</span>
+          <select name="cone">
+            <option value="">—</option>
+          </select>
+        </label>
+      </div>
+
+      <fieldset class="field">
+        <legend>Stage</legend>
+        <div class="segmented segmented-4" id="stageSeg"></div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Dates</legend>
+        <div class="dates-grid">
+          <label><span>Made</span><input type="date" name="dateMade"></label>
+          <label><span>Bisque fired</span><input type="date" name="dateBisque"></label>
+          <label><span>Glaze fired</span><input type="date" name="dateGlazed"></label>
+          <label><span>Finished</span><input type="date" name="dateDone"></label>
+        </div>
+      </fieldset>
+
+      <label class="field">
+        <span>Notes</span>
+        <textarea name="notes" rows="5" placeholder="Dimensions, glaze application, results, what to try next…"></textarea>
+      </label>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </template>
+
+  <template id="tpl-backup">
+    <section class="backup-view">
+      <div class="panel">
+        <h2>Google Drive backup</h2>
+        <p class="muted">Pieces are saved on this device. Back them up to your own Google Drive to keep them safe or move them to another device. The app can only see files it created.</p>
+        <div id="driveUnconfigured" hidden>
+          <p class="warn">Google sign-in isn't set up yet. Add your OAuth client ID to <code>js/config.js</code> (see the README).</p>
+        </div>
+        <div id="driveSignedOut" hidden>
+          <button class="btn btn-google" id="signInBtn">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.8 6C12.3 13.5 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.9-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.7-4-13.6-9.8l-7.8 6C6.6 42.6 14.6 48 24 48z"/></svg>
+            Sign in with Google
+          </button>
+        </div>
+        <div id="driveSignedIn" hidden>
+          <p class="account" id="accountLabel"></p>
+          <p class="muted small" id="lastBackupLabel"></p>
+          <div class="progress" id="driveProgress" hidden><div class="progress-bar" id="driveProgressBar"></div><span id="driveProgressText"></span></div>
+          <div class="btn-col">
+            <button class="btn btn-primary" id="backupBtn">Back up now</button>
+            <button class="btn btn-secondary" id="restoreBtn">Restore from Drive</button>
+            <button class="btn btn-ghost" id="signOutBtn">Sign out</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>On this device</h2>
+        <p class="muted" id="localStats"></p>
+        <p class="muted small" id="persistLabel"></p>
+      </div>
+
+      <p class="muted small center">Pottery Log · data stays on your device and in your Drive</p>
+    </section>
+  </template>
+
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/drive.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
