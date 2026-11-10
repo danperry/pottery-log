@@ -513,6 +513,9 @@
       $('#driveSignedIn').hidden = !Drive.configured || !Drive.isSignedIn();
       const acct = Drive.getAccount();
       if (acct) $('#accountLabel').textContent = 'Signed in as ' + (acct.email || acct.name || 'Google user');
+      const folder = Drive.getFolder();
+      $('#folderLabel').textContent = folder ? folder.name : 'Not chosen yet';
+      $('#pickFolderBtn').textContent = folder ? 'Change folder' : 'Choose folder';
       const last = store(LAST_BACKUP_KEY);
       const newest = pieces.reduce((m, p) => Math.max(m, p.updatedAt || 0), 0);
       let label = last ? 'Last backup: ' + fmtDateTime(last.at) : 'Not backed up yet from this device.';
@@ -524,7 +527,7 @@
     const progress = $('#driveProgress');
     const bar = $('#driveProgressBar');
     const ptext = $('#driveProgressText');
-    const buttons = ['#backupBtn', '#restoreBtn', '#signOutBtn'].map((s) => $(s));
+    const buttons = ['#backupBtn', '#restoreBtn', '#signOutBtn', '#pickFolderBtn', '#newFolderBtn'].map((s) => $(s));
     function busy(on, text, frac) {
       buttons.forEach((b) => { b.disabled = on; });
       progress.hidden = !on;
@@ -538,6 +541,45 @@
         toast('Connected to Google Drive');
       } catch (err) {
         toast(err.message);
+      }
+    });
+
+    // Check the saved folder still exists (only when we can do it without a sign-in popup).
+    if (Drive.configured && Drive.isSignedIn() && Drive.hasToken()) {
+      Drive.resolveFolder().then(draw).catch(() => {});
+    }
+
+    $('#pickFolderBtn').addEventListener('click', async () => {
+      try {
+        await Drive.ensureToken();
+        const f = await Drive.pickFolder();
+        if (f) { draw(); toast('Backups will go to “' + f.name + '”'); }
+      } catch (err) {
+        toast(err.message, 4000);
+      }
+    });
+
+    const newForm = $('#newFolderForm');
+    $('#newFolderBtn').addEventListener('click', () => {
+      newForm.hidden = !newForm.hidden;
+      if (!newForm.hidden) { $('#newFolderName').focus(); $('#newFolderName').select(); }
+    });
+    $('#newFolderCancel').addEventListener('click', () => { newForm.hidden = true; });
+    newForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = $('#newFolderName').value.trim();
+      if (!name) { toast('Give the folder a name'); return; }
+      try {
+        await Drive.ensureToken();
+        busy(true, 'Creating folder…', 0.5);
+        const f = await Drive.createFolder(name);
+        busy(false);
+        newForm.hidden = true;
+        draw();
+        toast('Created “' + f.name + '” in My Drive');
+      } catch (err) {
+        busy(false);
+        toast(err.message, 4000);
       }
     });
 
@@ -556,6 +598,7 @@
         toast('Backed up to Google Drive');
       } catch (err) {
         busy(false);
+        draw();
         if (err.message !== 'cancelled') toast(err.message, 4000);
       }
     });
@@ -569,14 +612,19 @@
         renderBackup();
       } catch (err) {
         busy(false);
+        draw();
         if (err.message !== 'cancelled') toast(err.message, 4000);
       }
     });
   }
 
+  const NO_FOLDER = 'Choose or create a backup folder first.';
+
   async function backup(onProgress) {
-    onProgress('Finding backup folder…', 0.02);
-    const folder = await Drive.ensureFolder();
+    onProgress('Checking backup folder…', 0.02);
+    const chosen = await Drive.resolveFolder();
+    if (!chosen) throw new Error(NO_FOLDER);
+    const folder = chosen.id;
     const dataFile = await Drive.findDataFile(folder);
     const last = store(LAST_BACKUP_KEY);
 
@@ -622,9 +670,11 @@
 
   async function restore(onProgress) {
     onProgress('Looking for a backup…', 0.02);
-    const folder = await Drive.findFolder();
-    const dataFile = folder && await Drive.findDataFile(folder);
-    if (!dataFile) throw new Error('No Pottery Log backup was found in this Google Drive.');
+    const chosen = await Drive.resolveFolder();
+    if (!chosen) throw new Error(NO_FOLDER);
+    const folder = chosen.id;
+    const dataFile = await Drive.findDataFile(folder);
+    if (!dataFile) throw new Error('No Pottery Log backup was found in “' + chosen.name + '”.');
     const data = await Drive.readData(dataFile.id);
     if (!data || data.app !== 'pottery-log' || !Array.isArray(data.pieces)) throw new Error('The backup file looks damaged.');
 
