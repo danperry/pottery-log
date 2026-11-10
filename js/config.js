@@ -3,7 +3,7 @@
  */
 window.POTTERY_CONFIG = {
   // OAuth 2.0 "Web application" client ID, e.g. '1234567890-abc123.apps.googleusercontent.com'
-  googleClientId: '',
+  googleClientId: '668841456155-egdtnh49ote38n7fsqae8e1dtdso19gt.apps.googleusercontent.com',
 
   // API key for the Google Picker (used by "Choose folder"), restricted to your site and
   // the Google Picker API, e.g. 'AIzaSy...'.
