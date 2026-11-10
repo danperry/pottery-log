@@ -103,13 +103,14 @@ Tap the cloud icon in the top bar.
   - **Choose folder** opens Google's folder picker. Pick any folder in My Drive or a shared drive. Picking it gives the app access to that one folder, and nothing else in your Drive.
   - **New folder** creates a folder with the name you type (default `Pottery Log`) at the top of My Drive.
 - **Back up now** writes `pottery-log.json` (all piece details) and one JPEG per photo into the backup folder. Later backups upload only new photos, rewrite the JSON, and remove photos of deleted pieces. The app only ever touches files it created, so other files you keep in that folder are left alone. A backup is a snapshot of this device: if the folder holds a newer backup from a different device, the app warns you before overwriting it.
+- **Back up automatically whenever I save** is offered next to the sign-in button, and you can switch it on or off later. When it's on, every save, stage change or delete backs up in the background. The cloud icon pulses while that runs and shows a yellow dot when there are changes not yet in Drive. If an automatic backup can't run (offline, or no folder chosen), the dot stays until the next save, the next app launch with a connection, or a manual **Back up now**. Automatic backup never overwrites a newer backup from another device. It stops and asks you to decide on the Backup screen.
 - **Restore from Drive** replaces the pieces on this device with the backup in the chosen folder, downloading any photos that aren't already here.
 
 If you change the backup folder, the next backup copies everything into the new folder. The old folder is left as it was.
 
 To move to a new phone: back up on the old one. Then install the app on the new one, sign in, use **Choose folder** to pick the same folder, and restore.
 
-Google access tokens last about an hour and the app keeps them only for the browser session, so you may see Google's popup flash briefly when you back up later. If popups are blocked, allow them for your github.io site.
+The app remembers your Google account, backup folder and auto-backup setting until you tap **Sign out**, including across app restarts. Google gives browser-only apps access tokens that last about an hour, with no long-lived refresh token, so the app keeps the current token on the device and asks Google for a new one when it runs out. Google only allows that at the moment you tap something. After an hour or so, the next save (or **Back up now**) briefly flashes Google's popup, which closes by itself without asking anything. If popups are blocked, allow them for your github.io site.
 
 ## Adding to an Android home screen
 
