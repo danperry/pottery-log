@@ -30,6 +30,7 @@
   const backupNavBtn = $('#backupNavBtn');
 
   const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const ICON_GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>';
   const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
   const ICON_POT = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M22 10h20M24 10c0 6-10 10-10 24 0 12 8 20 18 20s18-8 18-20c0-14-10-18-10-24"/></svg>';
 
@@ -882,7 +883,7 @@
         const input = form.elements['cf:' + cf.id];
         if (!input) continue;
         const v = cf.type === 'yesno' ? input.checked : Settings.coerce(cf, input.value.trim());
-        if (v === '' || (cf.type === 'yesno' && !v && custom[cf.id] === undefined)) delete custom[cf.id];
+        if (v === '') delete custom[cf.id];
         else custom[cf.id] = v;
       }
       // Remember values newly typed into remembered text fields (one taken off a list stays off).
@@ -975,7 +976,20 @@
     function drawCustomFields() {
       const fields = Settings.fields();
       $('#cfList').replaceChildren(...fields.map((f) => {
-        const li = el('li', null,
+        const li = el('li', { 'data-id': f.id },
+          el('button', {
+            class: 'drag-handle', type: 'button', html: ICON_GRIP,
+            'aria-label': 'Move ' + f.name + ' (drag, or use the arrow keys)',
+            onpointerdown: (e) => startFieldDrag(e, li),
+            onkeydown: (e) => {
+              if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              const sib = e.key === 'ArrowUp' ? li.previousElementSibling : li.nextElementSibling;
+              if (!sib) return;
+              if (e.key === 'ArrowUp') li.after(sib); else li.before(sib); // keeps focus on the handle
+              saveFieldOrder();
+            },
+          }),
           el('span', { class: 'cf-name' }, f.name),
           el('span', { class: 'cf-meta' }, fieldMeta(f)),
           el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + f.name, html: ICON_EDIT, onclick: () => editField(li, f) }),
@@ -992,12 +1006,45 @@
       }));
       $('#cfList').hidden = !fields.length;
     }
+    // Drag a field's handle to reorder (pointer events, so touch and mouse both work).
+    function saveFieldOrder() {
+      const ids = [...$('#cfList').children].map((li) => li.dataset.id);
+      if (Settings.reorderFields(ids)) markChanged();
+    }
+    function startFieldDrag(e, li) {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      const handle = e.currentTarget;
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* keep going without capture */ }
+      li.classList.add('dragging');
+      let lastY = e.clientY;
+      const move = (ev) => {
+        lastY = ev.clientY;
+        // Move the neighbours rather than the dragged row, which would drop the pointer capture.
+        const mid = (x) => { const r = x.getBoundingClientRect(); return r.top + r.height / 2; };
+        let p;
+        while ((p = li.previousElementSibling) && lastY < mid(p)) li.after(p);
+        let n;
+        while ((n = li.nextElementSibling) && lastY > mid(n)) li.before(n);
+      };
+      const end = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        li.classList.remove('dragging');
+        saveFieldOrder();
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    }
+
     // Edit a field in place: name, type, "remember values", and its list (choices or remembered values).
     function editField(li, f) {
       const name = el('input', { maxlength: '60', value: f.name, autocomplete: 'off' });
       const type = el('select', null, Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
       const remember = el('input', { type: 'checkbox', checked: f.type !== 'text' || f.remember !== false });
-      const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember values for a drop-down'));
+      const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember entered values for a drop-down'));
       const list = el('textarea', { rows: '4' });
       list.value = (f.type === 'choice' ? f.options : f.values || []).join('\n');
       const listLabel = el('span');
