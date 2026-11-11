@@ -13,7 +13,7 @@ window.POTTERY_CONFIG = {
 
   // API key for the Google Picker (used by "Choose folder"), restricted to your site and
   // the Google Picker API, e.g. 'AIzaSy...'.
-  googleApiKey: '',
+  googleApiKey: 'AIzaSyCtIGQ7aPKebZJBhBOB-m0c8NWTkJ3wuaw',
 
   // Cloud project number. Leave empty: it is read from the start of the client ID.
   googleAppId: '',
