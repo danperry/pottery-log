@@ -236,6 +236,8 @@ Every save records when it happened (`savedAt`). If the same piece was changed o
 
 On open, the app reads only the index, so even a long log appears quickly. Pieces that came from another device show their summary (title, stage, clay, glazes, dates and cover photo) straight away. Their notes and other photos download the first time you open the piece, and are kept on the device after that. Offline, an unopened piece shows its summary and says the rest will load when you're back online.
 
+While the device is offline, a small note under the title bar says everything is saved on the device and will sync when you're back online; saving a piece says the same. The app syncs on its own as soon as the connection returns.
+
 ### Moving devices and changing folders
 
 To set up a new phone: install the app, sign in and use **Choose folder** to pick the same folder. Your pieces appear and fill in as you open them.

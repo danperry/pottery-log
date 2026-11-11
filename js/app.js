@@ -870,7 +870,7 @@
       const removed = [...originalPhotos, ...addedPhotos].filter((pid) => !kept.has(pid));
       await DB.deletePhotos(removed);
       markChanged();
-      toast(isNew ? 'Piece added' : 'Saved');
+      toast((isNew ? 'Piece added' : 'Saved') + (!navigator.onLine && connected() ? '. It will sync when you\'re back online.' : ''), !navigator.onLine ? 3000 : undefined);
       DB.requestPersistence();
       if (isNew) nav('#/piece/' + encodeURIComponent(piece.id), true);
       else backBtn.click();
@@ -1184,9 +1184,17 @@
     backupNavBtn.setAttribute('aria-label', syncing ? 'Settings (syncing…)'
       : Drive.needsReconnect() ? 'Settings (Google Drive needs reconnecting)'
       : pending ? 'Settings (changes not synced yet)' : 'Settings');
-    // Lost the Google connection: say so on every screen, with a one-tap fix.
-    $('#reconnectBar').hidden = !(Drive.configured && Drive.needsReconnect()) || location.hash.startsWith('#/backup');
+    // Offline: a calm note that nothing is lost (and that it syncs later, when Drive is connected).
+    const offline = !navigator.onLine;
+    $('#offlineNote').hidden = !offline;
+    $('#offlineNoteText').textContent = Drive.configured && (Drive.isSignedIn() || Drive.needsReconnect())
+      ? 'You\'re offline. Everything is saved on this device and will sync when you\'re back online.'
+      : 'You\'re offline. Everything is saved on this device.';
+    // Lost the Google connection: say so on every screen, with a one-tap fix (not while offline).
+    $('#reconnectBar').hidden = offline || !(Drive.configured && Drive.needsReconnect()) || location.hash.startsWith('#/backup');
   }
+  window.addEventListener('online', () => updateBadge());
+  window.addEventListener('offline', () => updateBadge());
   $('#reconnectBarBtn').addEventListener('click', () => Drive.signIn());
 
   /** Call after any local change to a piece. */
