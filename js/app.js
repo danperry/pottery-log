@@ -321,6 +321,75 @@
     tip.hidden = false;
   }
 
+  /* ---------- clays and glazes ---------- */
+
+  /** Clay bodies of a piece (older records had one clayBody string). */
+  const claysOf = (p) => (Array.isArray(p.clays) ? p.clays : p.clayBody ? [p.clayBody] : []);
+
+  function clayLabel(name) {
+    const c = Settings.clay(name);
+    return c && c.cone ? name + ' (cone ' + c.cone + ')' : name;
+  }
+
+  function coneOptions(selected, emptyLabel) {
+    return [el('option', { value: '' }, emptyLabel || 'Cone —'),
+      ...CONES.map((c) => el('option', { value: c, selected: c === selected }, 'Cone ' + c))];
+  }
+
+  /**
+   * Chosen values as tags, plus a drop-down of remembered ones and a "New…" option to type
+   * one. kind is 'glaze' or 'clay' (new clays also get a cone).
+   * Returns { flush() } to add anything typed but not yet added, and newCones for new clays.
+   */
+  function tagPicker(box, values, kind) {
+    const noun = kind === 'clay' ? 'clay body' : 'glaze';
+    const known = () => (kind === 'clay' ? Settings.clays().map((c) => c.name) : Settings.glazes());
+    const newCones = {};
+    const tags = el('div', { class: 'tags' });
+    const row = el('div', { class: 'pick-row' });
+    let typing = false;
+    const has = (v) => values.some((x) => x.toLowerCase() === v.toLowerCase());
+    function add(v, cone) {
+      v = String(v || '').trim().slice(0, 120);
+      if (!v || has(v)) return;
+      values.push(v);
+      if (kind === 'clay' && cone !== undefined && !Settings.clay(v)) newCones[v] = cone;
+    }
+    function drawTags() {
+      tags.replaceChildren(...values.map((v, i) => el('span', { class: 'tag' }, v,
+        kind === 'clay' && (Settings.clay(v) || {}).cone ? el('span', { class: 'cone-note' }, 'cone ' + Settings.clay(v).cone)
+          : kind === 'clay' && newCones[v] ? el('span', { class: 'cone-note' }, 'cone ' + newCones[v]) : null,
+        el('button', { type: 'button', 'aria-label': 'Remove ' + v, html: ICON_X, onclick: () => { values.splice(i, 1); draw(); } }))));
+    }
+    function drawRow() {
+      if (typing) {
+        const input = el('input', { maxlength: '120', autocomplete: 'off', placeholder: 'New ' + noun + ' name', 'aria-label': 'New ' + noun + ' name' });
+        const cone = kind === 'clay' ? el('select', { class: 'cone', 'aria-label': 'Cone for this clay' }, coneOptions('', 'Cone')) : null;
+        const commit = () => { add(input.value, cone ? cone.value : undefined); typing = false; draw(); };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') { typing = false; draw(); } });
+        row.replaceChildren(...[input, cone].filter(Boolean), el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: commit }, 'Add'));
+        row.flush = () => { if (input.value.trim()) add(input.value, cone ? cone.value : undefined); };
+        input.focus();
+        return;
+      }
+      row.flush = () => {};
+      const options = known().filter((v) => !has(v)).sort((a, b) => a.localeCompare(b));
+      const sel = el('select', { 'aria-label': 'Add a ' + noun },
+        el('option', { value: '' }, values.length ? 'Add another ' + noun + '…' : 'Choose a ' + noun + '…'),
+        options.map((v) => el('option', { value: v }, kind === 'clay' ? clayLabel(v) : v)),
+        el('option', { value: '__new' }, '+ New ' + noun + '…'));
+      sel.addEventListener('change', () => {
+        if (sel.value === '__new') typing = true; else if (sel.value) add(sel.value);
+        draw();
+      });
+      row.replaceChildren(sel);
+    }
+    function draw() { drawTags(); drawRow(); }
+    box.replaceChildren(tags, row);
+    draw();
+    return { flush: () => row.flush(), newCones };
+  }
+
   /* ---------- field values (built-in and custom), for filters and display ---------- */
 
   function filterDefs() {
@@ -332,7 +401,8 @@
     if (id === 'glazes') return p.glazes || [];
     if (id === 'method') return p.method ? [METHOD_LABEL[p.method] || p.method] : [];
     if (id === 'cone') return p.cone ? [coneLabel(p.cone)] : [];
-    if (id === 'clayBody' || id === 'firingType') return p[id] ? [p[id]] : [];
+    if (id === 'clayBody') return claysOf(p);
+    if (id === 'firingType') return p[id] ? [p[id]] : [];
     const f = Settings.field(id);
     const v = f ? Settings.format(f, (p.custom || {})[id]) : '';
     return v ? [v] : [];
@@ -380,7 +450,7 @@
         if (want && !fieldValues(p, id).includes(want)) return false;
       }
       if (!query) return true;
-      const hay = [p.title, p.clayBody, METHOD_LABEL[p.method], (p.glazes || []).join(' '), p.firingType,
+      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '), p.firingType,
         coneLabel(p.cone), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
       return query.split(/\s+/).every((w) => hay.includes(w));
     }
@@ -397,7 +467,7 @@
         if (p.photoIds && p.photoIds[0]) {
           piecePhotoUrl(p, p.photoIds[0]).then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
         }
-        const sub = [p.clayBody, (p.glazes || []).join(', ')].filter(Boolean).join(' · ') || METHOD_LABEL[p.method] || '';
+        const sub = [claysOf(p).join(', '), (p.glazes || []).join(', ')].filter(Boolean).join(' · ') || METHOD_LABEL[p.method] || '';
         return el('li', null, el('button', { class: 'card', onclick: () => nav('#/piece/' + encodeURIComponent(p.id)) },
           thumb,
           el('div', { class: 'meta' },
@@ -538,7 +608,8 @@
 
     const facts = [];
     const add = (k, v) => { if (v) facts.push(el('dt', null, k), el('dd', null, v)); };
-    add('Clay body', p.clayBody);
+    const clays = claysOf(p);
+    if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.map(clayLabel).join(', '));
     add('Forming', METHOD_LABEL[p.method]);
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
     add('Firing', [p.firingType, coneLabel(p.cone)].filter(Boolean).join(', '));
@@ -597,7 +668,7 @@
     }
     const isNew = !existing;
     const piece = existing ? structuredClone(existing) : {
-      id: DB.uid(), title: '', photoIds: [], clayBody: '', method: 'wheel', glazes: [],
+      id: DB.uid(), title: '', photoIds: [], clays: [], method: 'wheel', glazes: [],
       firingType: '', cone: '', stage: 'greenware', dateMade: today(), dateBisque: '', dateGlazed: '',
       dateDone: '', notes: '', createdAt: Date.now(),
     };
@@ -610,11 +681,13 @@
     const form = $('#editForm');
     const f = form.elements;
 
-    // Autocomplete from previous pieces.
     const all = (await DB.allPieces()).filter((p) => !p.deleted);
-    const uniq = (arr) => [...new Set(arr.filter(Boolean).map((s) => s.trim()))].sort((a, b) => a.localeCompare(b));
-    $('#clayList').replaceChildren(...uniq(all.map((p) => p.clayBody)).map((v) => el('option', { value: v })));
-    $('#glazeList').replaceChildren(...uniq(all.flatMap((p) => p.glazes || [])).map((v) => el('option', { value: v })));
+    piece.clays = [...claysOf(piece)];
+    delete piece.clayBody;
+    piece.glazes = [...(piece.glazes || [])];
+    const hadNames = new Set([...piece.clays, ...piece.glazes].map((v) => v.toLowerCase())); // removed from a list stays removed
+    const clayPick = tagPicker($('#clayPicker'), piece.clays, 'clay');
+    const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze');
 
     // Cones.
     f.cone.append(...CONES.map((c) => el('option', { value: c }, 'Cone ' + c)));
@@ -625,7 +698,6 @@
 
     // Fill values.
     f.title.value = piece.title;
-    f.clayBody.value = piece.clayBody;
     form.querySelectorAll('input[name=method]').forEach((r) => { r.checked = r.value === piece.method; });
     f.firingType.value = piece.firingType;
     if (piece.firingType && f.firingType.value !== piece.firingType) {
@@ -669,22 +741,6 @@
       const s = STAGE_BY_ID[r.value];
       if (s && !f[s.date].value) f[s.date].value = today();
     }));
-
-    // Glazes.
-    const glazeInput = $('#glazeInput');
-    function drawGlazes() {
-      $('#glazeTags').replaceChildren(...piece.glazes.map((g, i) => el('span', { class: 'tag' }, g,
-        el('button', { type: 'button', 'aria-label': 'Remove ' + g, html: ICON_X, onclick: () => { piece.glazes.splice(i, 1); drawGlazes(); } }))));
-    }
-    function addGlaze() {
-      const v = glazeInput.value.trim();
-      if (v && !piece.glazes.some((g) => g.toLowerCase() === v.toLowerCase())) piece.glazes.push(v);
-      glazeInput.value = '';
-      drawGlazes();
-    }
-    glazeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addGlaze(); } });
-    $('#glazeAddBtn').addEventListener('click', () => { addGlaze(); glazeInput.focus(); });
-    drawGlazes();
 
     // Photos.
     const grid = $('#photoGrid');
@@ -732,11 +788,10 @@
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (glazeInput.value.trim()) addGlaze();
+      clayPick.flush(); glazePick.flush();
       const title = f.title.value.trim();
       if (!title) { toast('Give the piece a title'); f.title.focus(); return; }
       piece.title = title;
-      piece.clayBody = f.clayBody.value.trim();
       piece.method = (form.querySelector('input[name=method]:checked') || {}).value || '';
       piece.firingType = f.firingType.value;
       piece.cone = f.cone.value;
@@ -751,6 +806,9 @@
         else custom[cf.id] = v;
       }
       piece.custom = custom;
+      // Remember new glazes and clays for the drop-downs (synced with the other settings).
+      const isNew = (v) => !hadNames.has(v.toLowerCase());
+      Settings.learn({ glazes: piece.glazes.filter(isNew), clays: piece.clays.filter(isNew).map((name) => ({ name, cone: clayPick.newCones[name] || '' })) });
       piece.updatedAt = Date.now();
       await DB.putPiece(piece);
       saved = true;
@@ -772,16 +830,19 @@
   async function renderBackup() {
     setChrome({ title: 'Settings', back: true, fab: false });
     mount('tpl-backup');
+    const view = app.firstElementChild;
 
     const pieces = (await DB.allPieces()).filter((p) => !p.deleted);
     const photoIds = await DB.allPhotoIds();
     const est = await DB.estimate();
+    if (!view.isConnected) return; // left Settings while reading
     const stubs = pieces.filter((p) => p.stub).length;
     $('#localStats').textContent = pieces.length + (pieces.length === 1 ? ' piece' : ' pieces') + ', ' +
       photoIds.length + (photoIds.length === 1 ? ' photo' : ' photos') +
       (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used' : '') +
       (stubs ? '. ' + stubs + ' synced ' + (stubs === 1 ? 'piece loads its' : 'pieces load their') + ' notes and photos when opened.' : '');
     const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
+    if (!view.isConnected) return;
     const how = installHowTo();
     if (persisted) $('#persistLabel').textContent = 'Storage is marked persistent, so the browser won\'t clear it on its own.';
     else if (how) $('#persistLabel').innerHTML = 'Add the app to your home screen so the browser is less likely to clear its storage. ' + how;
@@ -856,7 +917,52 @@
       }
     });
     drawCustomFields();
-    onBackupStateChange = () => { draw(); drawCustomFields(); };
+
+    // Glaze and clay lists.
+    function drawLists() {
+      const clays = Settings.clays();
+      $('#clayListEdit').replaceChildren(...clays.map((c, i) => {
+        const cone = el('select', { 'aria-label': 'Cone for ' + c.name }, coneOptions(c.cone));
+        cone.addEventListener('change', () => {
+          Settings.setClays(clays.map((x, j) => (j === i ? { ...x, cone: cone.value } : x)));
+          markChanged();
+        });
+        return el('li', null, el('span', { class: 'cf-name' }, c.name), el('span', { class: 'cf-meta' }), cone,
+          el('button', {
+            class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + c.name, html: ICON_X,
+            onclick: () => { Settings.setClays(clays.filter((_, j) => j !== i)); drawLists(); markChanged(); },
+          }));
+      }));
+      const glazes = Settings.glazes();
+      $('#glazeListEdit').replaceChildren(...glazes.map((g, i) => el('li', null,
+        el('span', { class: 'cf-name' }, g), el('span', { class: 'cf-meta' }),
+        el('button', {
+          class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + g, html: ICON_X,
+          onclick: () => { Settings.setGlazes(glazes.filter((_, j) => j !== i)); drawLists(); markChanged(); },
+        }))));
+      $('#clayListEdit').hidden = !clays.length;
+      $('#glazeListEdit').hidden = !glazes.length;
+    }
+    $('#clayAddCone').replaceChildren(...coneOptions('', 'Cone'));
+    $('#clayAddForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = $('#clayAddName').value.trim();
+      if (!name) return;
+      if (Settings.clay(name)) { toast('“' + name + '” is already in the list'); return; }
+      Settings.setClays([...Settings.clays(), { name, cone: $('#clayAddCone').value }]);
+      $('#clayAddName').value = ''; $('#clayAddCone').value = '';
+      drawLists(); markChanged();
+    });
+    $('#glazeAddForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = $('#glazeAddName').value.trim();
+      if (!name) return;
+      if (!Settings.learn({ glazes: [name] })) { toast('“' + name + '” is already in the list'); return; }
+      $('#glazeAddName').value = '';
+      drawLists(); markChanged();
+    });
+    drawLists();
+    onBackupStateChange = () => { draw(); drawCustomFields(); drawLists(); };
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
@@ -1033,9 +1139,42 @@
       } else if (stats.pushed && !opts.quiet && !opts.throws) {
         toast('Synced with Google Drive', 1600);
       }
+      if (await seedLists(true)) await refreshPending();
       if (pendingCount && connected()) runSync({ quiet: true }); // changes made while syncing
       return stats;
     });
+  }
+
+  /** First run with glaze/clay lists: remember what existing pieces already use. */
+  // Fill the glaze and clay lists from pieces saved before the lists existed. The names are
+  // noted once at startup, before anything comes down from Drive, and used quietly so lists
+  // already in Drive aren't replaced. After the first sync they're added for real, on top of
+  // whatever came down from Drive.
+  let seedNames = null;
+  function noteSeedNames() {
+    if (!seedNames) {
+      seedNames = (async () => {
+        let names = store('potteryLog.listsSeed');
+        if (!names) {
+          const ps = (await DB.allPieces()).filter((p) => !p.deleted);
+          names = { glazes: ps.flatMap((p) => p.glazes || []), clays: ps.flatMap(claysOf) };
+          store('potteryLog.listsSeed', names);
+        }
+        return names;
+      })();
+    }
+    return seedNames;
+  }
+  async function seedLists(afterSync) {
+    if (store('potteryLog.listsSeeded')) return false;
+    const names = await noteSeedNames();
+    if (!afterSync) return Settings.learn(names, { quiet: true });
+    store('potteryLog.listsSeeded', Date.now());
+    store('potteryLog.listsSeed', null);
+    if (Settings.learn(names)) return true;
+    const s = Settings.get(); // seeded quietly and Drive had nothing newer: upload them
+    if (!s.updatedAt && (s.glazes.length || s.clays.length)) { Settings.update({}); return true; }
+    return false;
   }
 
   /** Load a synced piece's notes and photos the first time it's opened on this device. */
@@ -1069,6 +1208,7 @@
     route();
 
     Sync.init({ makeThumb });
+    seedLists(false);
     try { localStorage.removeItem('potteryLog.changeSeq'); localStorage.removeItem('potteryLog.backedSeq'); localStorage.removeItem('potteryLog.lastBackup'); localStorage.removeItem('potteryLog.deviceId'); } catch (e) { /* ignore */ }
     refreshPending().catch(() => {});
 

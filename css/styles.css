@@ -283,7 +283,7 @@ fieldset.field > legend { margin-bottom: 6px; }
 .folder-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .new-folder { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .new-folder p { margin: 0; }
-.backup-view { display: grid; gap: 16px; }
+.backup-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .panel { background: var(--surface); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
 .panel h2 { margin: 0 0 6px; font-size: 1.15rem; }
 .muted { color: var(--muted); }
@@ -358,3 +358,18 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .conn-bar { position: sticky; top: calc(var(--topbar-h) + env(safe-area-inset-top)); z-index: 9; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f6d36b; color: #3a2a10; font-size: .92rem; }
 .conn-bar span { flex: 1; min-width: 0; }
 .conn-bar .btn { flex: none; background: #3a2a10; color: #fff; border: 0; }
+
+/* Glaze and clay pickers (edit form) and list editors (settings) */
+.tag-picker { display: grid; gap: 8px; }
+.tag-picker .tags:empty { display: none; }
+.tag-picker .pick-row { display: flex; gap: 8px; }
+.tag-picker .pick-row > * { min-width: 0; }
+.tag-picker .pick-row select, .tag-picker .pick-row input { flex: 1; }
+.tag-picker .pick-row select.cone { flex: 0 0 auto; width: auto; max-width: 42%; }
+.tag-picker .pick-row .btn { flex: none; }
+.tag .cone-note { opacity: .7; font-size: .85em; margin-left: 2px; }
+.list-head { margin: 18px 0 4px; font-size: .95rem; }
+.list-add { display: flex; gap: 8px; }
+.list-add input { flex: 1; min-width: 0; width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }
+.list-add select, .cf-list select { height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; flex: none; width: 7.5em; }
+.cf-list select { height: 36px; }

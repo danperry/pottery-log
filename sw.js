@@ -1,6 +1,6 @@
 /* Pottery Log service worker: caches the app shell so it opens offline.
  * Bump VERSION whenever you change any of the files below. */
-const VERSION = 'v11';
+const VERSION = 'v12';
 const CACHE = 'pottery-log-' + VERSION;
 const SHELL = [
   './',

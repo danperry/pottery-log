@@ -5,6 +5,8 @@
  *
  *   { fields: [{ id, name, type, options? }],   type: text | number | date | yesno | choice
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
+ *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
+ *     clays: [{ name: 'B-Mix', cone: '6' }, …],   remembered clay bodies, each with its cone
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
@@ -47,7 +49,15 @@
       }));
     const known = new Set([...BUILTIN_FILTERS.map((b) => b.id), ...fields.map((f) => f.id)]);
     const filters = (Array.isArray(s.filters) ? s.filters : []).map(String).filter((id) => known.has(id));
-    return { fields, filters: [...new Set(filters)], updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
+    const seen = new Set();
+    const uniqueBy = (name) => { const k = name.toLowerCase(); if (!name || seen.has(k)) return false; seen.add(k); return true; };
+    const glazes = (Array.isArray(s.glazes) ? s.glazes : []).map((g) => String(g).trim().slice(0, 120)).filter(uniqueBy);
+    seen.clear();
+    const clays = (Array.isArray(s.clays) ? s.clays : [])
+      .map((c) => (typeof c === 'string' ? { name: c } : c || {}))
+      .map((c) => ({ name: String(c.name || '').trim().slice(0, 120), cone: String(c.cone || '') }))
+      .filter((c) => uniqueBy(c.name));
+    return { fields, filters: [...new Set(filters)], glazes, clays, updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
 
   function write(s) {
@@ -138,9 +148,36 @@
     fromNamed,
     coerce,
 
+    // ----- remembered glazes and clays -----
+    glazes: () => load().glazes,
+    clays: () => load().clays,
+    clay: (name) => load().clays.find((c) => c.name.toLowerCase() === String(name).toLowerCase()),
+
+    /** Remember names used on a piece. Only saves (and syncs) when something is new.
+     * quiet: keep updatedAt, so a newer copy from Drive still wins (used when seeding). */
+    learn({ glazes = [], clays = [] }, { quiet = false } = {}) {
+      const s = load();
+      const g = [...s.glazes]; const c = [...s.clays];
+      const hasG = new Set(g.map((x) => x.toLowerCase())); const hasC = new Set(c.map((x) => x.name.toLowerCase()));
+      for (const name of glazes) if (name && !hasG.has(name.toLowerCase())) { g.push(name); hasG.add(name.toLowerCase()); }
+      for (const x of clays) {
+        const item = typeof x === 'string' ? { name: x, cone: '' } : x;
+        if (item.name && !hasC.has(item.name.toLowerCase())) { c.push(item); hasC.add(item.name.toLowerCase()); }
+      }
+      if (g.length === s.glazes.length && c.length === s.clays.length) return false;
+      if (quiet) write(normalize({ ...s, glazes: g, clays: c }));
+      else this.update({ glazes: g, clays: c });
+      return true;
+    },
+    setGlazes(list) { this.update({ glazes: list }); },
+    setClays(list) { this.update({ clays: list }); },
+
     // ----- sync bookkeeping -----
     /** What goes into the index (no local bookkeeping). */
-    forDrive() { const s = load(); return { fields: s.fields, filters: s.filters, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null }; },
+    forDrive() {
+      const s = load();
+      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
+    },
     isDirty(rootId) { const s = load(); return !!s.updatedAt && (!s.sync || s.sync.root !== rootId || s.sync.syncedAt !== s.updatedAt); },
     markSynced(rootId, at) { const s = load(); write({ ...s, sync: { root: rootId, syncedAt: at } }); },
     /** Replace with a newer copy from Drive. */
