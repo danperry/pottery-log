@@ -306,3 +306,13 @@ fieldset.field > legend { margin-bottom: 6px; }
 @media (max-width: 360px) {
   .field-row, .dates-grid { grid-template-columns: 1fr; }
 }
+
+/* "Add to home screen" tip on phones */
+.install-tip { display: flex; gap: 12px; align-items: flex-start; background: var(--accent-soft); color: var(--text); border-radius: var(--radius); padding: 12px 8px 12px 14px; margin-bottom: 12px; }
+.install-tip img { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.install-tip .tip-body { flex: 1; min-width: 0; }
+.install-tip .tip-title { display: block; margin-bottom: 2px; }
+.install-tip p { margin: 0; font-size: .92rem; color: var(--muted); }
+.install-tip .tip-glyph { display: inline-block; vertical-align: -3px; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.install-tip .btn { margin-top: 8px; }
+.install-tip .icon-btn { flex: none; margin: -6px 0 0; color: var(--muted); }
