@@ -37,8 +37,24 @@
       <div class="install-tip" id="installTip" role="note" hidden></div>
       <div class="search-row">
         <input type="search" id="searchInput" placeholder="Search title, clay, glaze, notes…" aria-label="Search pieces">
+        <button type="button" class="icon-btn filter-btn" id="filterBtn" aria-label="Choose filters" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+          <span class="badge" id="filterBadge" hidden></span>
+        </button>
       </div>
       <div class="chips" id="stageFilter" role="tablist" aria-label="Filter by stage"></div>
+      <div class="field-filters" id="fieldFilters" hidden></div>
+      <dialog class="sheet" id="filterDialog" aria-labelledby="filterDialogTitle">
+        <form method="dialog">
+          <h2 id="filterDialogTitle">Filters on the home screen</h2>
+          <p class="muted small">Choose which fields to filter by. Your choice syncs to your other devices.</p>
+          <div class="check-list" id="filterChoices"></div>
+          <p class="muted small" id="filterNoCustom">Add your own fields under <a href="#/backup">Settings → Custom fields</a>.</p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" value="done">Done</button>
+          </div>
+        </form>
+      </dialog>
       <p class="count" id="countLabel"></p>
       <ul class="cards" id="cardList"></ul>
       <div class="empty" id="emptyState" hidden>
@@ -153,6 +169,8 @@
         </div>
       </fieldset>
 
+      <div class="custom-fields" id="customFields"></div>
+
       <label class="field">
         <span>Notes</span>
         <textarea name="notes" rows="5" placeholder="Dimensions, glaze application, results, what to try next…"></textarea>
@@ -230,6 +248,29 @@
         </div>
       </div>
 
+      <div class="panel" id="customFieldsPanel">
+        <h2>Custom fields</h2>
+        <p class="muted">Add your own fields to every piece, such as kiln, weight, price or who it's for. They sync with your other devices and appear in each piece's <code>piece.json</code>.</p>
+        <ul class="cf-list" id="cfList"></ul>
+        <form class="cf-add" id="cfAddForm">
+          <div class="field-row">
+            <label class="field">
+              <span>Field name</span>
+              <input id="cfName" maxlength="60" placeholder="e.g. Kiln" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Type</span>
+              <select id="cfType"></select>
+            </label>
+          </div>
+          <label class="field" id="cfOptionsRow" hidden>
+            <span>Choices, separated by commas</span>
+            <input id="cfOptions" maxlength="500" placeholder="e.g. Big kiln, Test kiln, Studio" autocomplete="off">
+          </label>
+          <button type="submit" class="btn btn-secondary btn-small">Add field</button>
+        </form>
+      </div>
+
       <div class="panel">
         <h2>On this device</h2>
         <p class="muted" id="localStats"></p>
@@ -243,6 +284,7 @@
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/drive.js"></script>
+  <script src="js/settings.js"></script>
   <script src="js/sync.js"></script>
   <script src="js/app.js"></script>
 </body>

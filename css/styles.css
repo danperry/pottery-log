@@ -316,3 +316,39 @@ fieldset.field > legend { margin-bottom: 6px; }
 .install-tip .tip-glyph { display: inline-block; vertical-align: -3px; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .install-tip .btn { margin-top: 8px; }
 .install-tip .icon-btn { flex: none; margin: -6px 0 0; color: var(--muted); }
+
+/* Field filters on the home screen */
+.search-row { display: flex; gap: 8px; align-items: center; }
+.search-row input { flex: 1; min-width: 0; }
+.filter-btn { position: relative; flex: none; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.filter-btn .badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: .72rem; font-weight: 700; display: grid; place-items: center; }
+.field-filters { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+.field-filters::-webkit-scrollbar { display: none; }
+.field-filters select { flex: none; max-width: 70vw; min-height: 36px; padding: 0 28px 0 12px; border-radius: 18px; border: 1px solid var(--border); background-color: var(--surface); color: var(--text); font: inherit; font-size: .9rem; }
+.field-filters select.active { background-color: var(--text); color: var(--bg); border-color: var(--text); }
+.field-filters .clear { flex: none; min-height: 36px; padding: 0 12px; border-radius: 18px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; }
+
+/* Pop-up sheet */
+dialog.sheet { border: 0; border-radius: 18px; padding: 20px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 64px); background: var(--surface); color: var(--text); box-shadow: 0 10px 40px rgba(0, 0, 0, .25); }
+dialog.sheet::backdrop { background: rgba(20, 14, 10, .45); }
+dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
+.check-list { display: grid; gap: 2px; margin: 12px 0; }
+.check-list label { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 4px; border-radius: 10px; cursor: pointer; }
+.check-list input { width: 20px; height: 20px; accent-color: var(--accent); }
+.check-list .type { margin-left: auto; color: var(--muted); font-size: .85rem; }
+.check-list h3 { margin: 10px 4px 2px; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+/* Custom fields: settings list and edit form */
+.cf-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; }
+.cf-list li { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.cf-list .cf-name { font-weight: 600; }
+.cf-list .cf-meta { color: var(--muted); font-size: .88rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-list .icon-btn { flex: none; width: 38px; height: 38px; color: var(--muted); }
+.cf-list .icon-btn svg { width: 18px; height: 18px; }
+.cf-add { display: grid; gap: 12px; }
+.cf-add .btn { justify-self: start; }
+.custom-fields { display: grid; gap: 18px; }
+.custom-fields:empty { display: none; }
+.custom-fields .yesno { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.field .yesno input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }
+.custom-fields .yesno b { font-weight: 500; }
