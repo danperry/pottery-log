@@ -3,10 +3,13 @@
  * Stored on the device (localStorage) and synced to Google Drive inside
  * pottery-log-index.json under "settings". The newest save wins, like pieces.
  *
- *   { fields: [{ id, name, type, options? }],   type: text | number | date | yesno | choice
+ *   { fields: [{ id, name, type, options?,        type: text | number | date | yesno | choice
+ *                remember?, values?, aliases? }],  text fields: remember typed values (values)
+ *                                                  aliases: earlier names, so old piece.json still reads
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
  *     clays: [{ name: 'B-Mix', cone: '6' }, …],   remembered clay bodies, each with its cone
+ *     defaultsAdded: true,                        the starter fields were offered once
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
@@ -24,9 +27,24 @@
     { id: 'clayBody', name: 'Clay body' },
     { id: 'method', name: 'Forming method' },
     { id: 'glazes', name: 'Glaze' },
-    { id: 'firingType', name: 'Firing type' },
-    { id: 'cone', name: 'Cone' },
+    { id: 'bisqueFiringType', name: 'Bisque firing type' },
+    { id: 'bisqueCone', name: 'Bisque cone' },
+    { id: 'glazeFiringType', name: 'Glaze firing type' },
+    { id: 'glazeCone', name: 'Glaze cone' },
   ];
+
+  // Fields every log starts with (added once; they can be edited or removed like any other).
+  const DEFAULT_FIELDS = [
+    { id: 'cf-line', name: 'Line', type: 'text', remember: true, values: [] },
+    { id: 'cf-price', name: 'Price', type: 'number' },
+    { id: 'cf-purpose', name: 'Purpose', type: 'text', remember: true, values: ['Keep', 'Give', 'Sell'] },
+  ];
+
+  const cleanList = (list, max = 120) => {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).map((x) => String(x == null ? '' : x).trim().slice(0, max))
+      .filter((x) => { const k = x.toLowerCase(); if (!x || seen.has(k)) return false; seen.add(k); return true; });
+  };
 
   const listeners = new Set();
   let cache = null;
@@ -42,13 +60,21 @@
   function normalize(s) {
     const fields = (Array.isArray(s.fields) ? s.fields : [])
       .filter((f) => f && f.id && f.name)
-      .map((f) => ({
-        id: String(f.id), name: String(f.name).trim().slice(0, 60),
-        type: TYPES[f.type] ? f.type : 'text',
-        ...(f.type === 'choice' ? { options: (Array.isArray(f.options) ? f.options : []).map(String).filter(Boolean) } : {}),
-      }));
+      .map((f) => {
+        const type = TYPES[f.type] ? f.type : 'text';
+        const out = { id: String(f.id), name: String(f.name).trim().slice(0, 60), type };
+        if (type === 'choice') out.options = cleanList(f.options);
+        if (type === 'text') {
+          if (typeof f.remember === 'boolean') out.remember = f.remember; // unset: older field, set up on first sync
+          out.values = cleanList(f.values, 200);
+        }
+        const aliases = cleanList(f.aliases, 60).filter((a) => a.toLowerCase() !== out.name.toLowerCase());
+        if (aliases.length) out.aliases = aliases;
+        return out;
+      });
     const known = new Set([...BUILTIN_FILTERS.map((b) => b.id), ...fields.map((f) => f.id)]);
-    const filters = (Array.isArray(s.filters) ? s.filters : []).map(String).filter((id) => known.has(id));
+    const renamed = { firingType: 'glazeFiringType', cone: 'glazeCone' }; // before bisque firing was added
+    const filters = (Array.isArray(s.filters) ? s.filters : []).map((id) => renamed[id] || String(id)).filter((id) => known.has(id));
     const seen = new Set();
     const uniqueBy = (name) => { const k = name.toLowerCase(); if (!name || seen.has(k)) return false; seen.add(k); return true; };
     const glazes = (Array.isArray(s.glazes) ? s.glazes : []).map((g) => String(g).trim().slice(0, 120)).filter(uniqueBy);
@@ -57,7 +83,7 @@
       .map((c) => (typeof c === 'string' ? { name: c } : c || {}))
       .map((c) => ({ name: String(c.name || '').trim().slice(0, 120), cone: String(c.cone || '') }))
       .filter((c) => uniqueBy(c.name));
-    return { fields, filters: [...new Set(filters)], glazes, clays, updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
+    return { fields, filters: [...new Set(filters)], glazes, clays, defaultsAdded: !!s.defaultsAdded, updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
 
   function write(s) {
@@ -82,7 +108,8 @@
   function fromNamed(obj) {
     const out = {};
     if (!obj || typeof obj !== 'object') return out;
-    const byName = new Map(load().fields.map((f) => [f.name.toLowerCase(), f]));
+    const byName = new Map();
+    for (const f of load().fields) for (const n of [...(f.aliases || []), f.name]) byName.set(n.toLowerCase(), f);
     for (const [name, raw] of Object.entries(obj)) {
       const f = byName.get(String(name).trim().toLowerCase());
       if (f) out[f.id] = coerce(f, raw);
@@ -94,6 +121,17 @@
     if (f.type === 'yesno') return v === true || v === 'true' || v === 'Yes' || v === 'yes';
     if (f.type === 'number') { const n = Number(v); return v === '' || Number.isNaN(n) ? '' : n; }
     return v == null ? '' : String(v);
+  }
+
+  const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'cone', 'firing type', 'forming method'];
+  function checkName(name, exceptId) {
+    name = String(name || '').trim().slice(0, 60);
+    if (!name) throw new Error('Give the field a name');
+    const lower = name.toLowerCase();
+    if (load().fields.some((f) => f.id !== exceptId && f.name.toLowerCase() === lower) || RESERVED.includes(lower)) {
+      throw new Error('There is already a field called “' + name + '”');
+    }
+    return name;
   }
 
   function slug(name) {
@@ -113,23 +151,78 @@
       write(normalize({ ...load(), ...changes, updatedAt: Date.now() }));
     },
 
-    addField(name, type, options) {
+    addField(name, type, options, remember = true) {
       const s = load();
-      name = String(name || '').trim().slice(0, 60);
-      if (!name) throw new Error('Give the field a name');
-      const lower = name.toLowerCase();
-      if (s.fields.some((f) => f.name.toLowerCase() === lower) || ['title', 'stage', 'notes', 'clay body', 'glazes', 'cone', 'firing type'].includes(lower)) {
-        throw new Error('There is already a field called “' + name + '”');
-      }
+      name = checkName(name);
       let id = 'cf-' + slug(name);
       while (s.fields.some((f) => f.id === id)) id += '-' + Math.random().toString(36).slice(2, 5);
       const field = { id, name, type: TYPES[type] ? type : 'text' };
       if (field.type === 'choice') {
-        field.options = [...new Set((options || []).map((o) => String(o).trim()).filter(Boolean))];
-        if (!field.options.length) throw new Error('Add at least one choice, separated by commas');
+        field.options = cleanList(options);
+        if (!field.options.length) throw new Error('Add at least one choice');
       }
+      if (field.type === 'text') { field.remember = !!remember; field.values = cleanList(options, 200); }
       this.update({ fields: [...s.fields, field] });
       return field;
+    },
+
+    /** Change a field's name, type, or its list (choices, or remembered values for text).
+     * Switching text ↔ choice carries the list across. Values already on pieces are kept. */
+    editField(id, { name, type, remember, list }) {
+      const s = load();
+      const old = s.fields.find((f) => f.id === id);
+      if (!old) throw new Error('That field no longer exists');
+      name = checkName(name, id);
+      type = TYPES[type] ? type : old.type;
+      const field = { id, name, type };
+      const carried = list !== undefined ? cleanList(list) : old.type === 'choice' ? old.options : old.values || [];
+      if (type === 'choice') {
+        field.options = carried;
+        if (!field.options.length) throw new Error('Add at least one choice');
+      }
+      if (type === 'text') { field.remember = remember !== undefined ? !!remember : old.type === 'choice' || old.remember !== false; field.values = carried; }
+      const aliases = [...(old.aliases || [])];
+      if (old.name.toLowerCase() !== name.toLowerCase()) aliases.push(old.name);
+      if (aliases.length) field.aliases = aliases.slice(-5);
+      this.update({ fields: s.fields.map((f) => (f.id === id ? field : f)) });
+      return field;
+    },
+
+    /** Remember new values typed into remembered text fields: { fieldId: value }. */
+    learnValues(byField) {
+      const s = load();
+      let changed = false;
+      const fields = s.fields.map((f) => {
+        const v = byField[f.id];
+        if (f.type !== 'text' || !f.remember || typeof v !== 'string' || !v.trim()) return f;
+        if ((f.values || []).some((x) => x.toLowerCase() === v.trim().toLowerCase())) return f;
+        changed = true;
+        return { ...f, values: [...(f.values || []), v.trim()] };
+      });
+      if (changed) this.update({ fields });
+      return changed;
+    },
+
+    /**
+     * One-time setup: add the starter fields and turn on "remember" for text fields made
+     * before that option existed (filling their lists from valuesFor(fieldId)).
+     * quiet: before the first sync, so anything newer in Drive still wins.
+     */
+    setUp(valuesFor, { quiet = false } = {}) {
+      const s = load();
+      let fields = s.fields;
+      const needsRemember = fields.some((f) => f.type === 'text' && f.remember === undefined);
+      if (s.defaultsAdded && !needsRemember) return false;
+      fields = fields.map((f) => (f.type === 'text' && f.remember === undefined
+        ? { ...f, remember: true, values: cleanList([...(f.values || []), ...valuesFor(f.id)], 200) } : f));
+      if (!s.defaultsAdded) {
+        const names = new Set(fields.map((f) => f.name.toLowerCase()));
+        const ids = new Set(fields.map((f) => f.id));
+        fields = [...fields, ...DEFAULT_FIELDS.filter((d) => !names.has(d.name.toLowerCase()) && !ids.has(d.id))];
+      }
+      const next = { ...s, fields, defaultsAdded: true };
+      if (quiet) write(normalize(next)); else this.update(next);
+      return true;
     },
 
     removeField(id) {
@@ -176,7 +269,7 @@
     /** What goes into the index (no local bookkeeping). */
     forDrive() {
       const s = load();
-      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
+      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, defaultsAdded: s.defaultsAdded, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
     },
     isDirty(rootId) { const s = load(); return !!s.updatedAt && (!s.sync || s.sync.root !== rootId || s.sync.syncedAt !== s.updatedAt); },
     markSynced(rootId, at) { const s = load(); write({ ...s, sync: { root: rootId, syncedAt: at } }); },

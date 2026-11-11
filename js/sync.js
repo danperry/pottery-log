@@ -44,14 +44,22 @@
   /** Clay bodies of a piece (older records had one clayBody string). */
   const claysOf = (p) => (Array.isArray(p.clays) ? p.clays : p.clayBody ? [p.clayBody] : []);
 
+  /** Bisque and glaze firing of a piece (older records had one firingType/cone, used for the glaze firing). */
+  const firingsOf = (p) => ({
+    bisque: { type: p.bisqueFiringType || '', cone: p.bisqueCone || '' },
+    glaze: { type: p.glazeFiringType ?? p.firingType ?? '', cone: p.glazeCone ?? p.cone ?? '' },
+  });
+
   function describe(p) {
+    const fire = firingsOf(p);
     return {
       title: p.title || 'Untitled',
       stage: STAGES[p.stage] || 'Greenware',
       clays: claysOf(p),
       formingMethod: METHODS[p.method] || '',
       glazes: p.glazes || [],
-      firing: { type: p.firingType || '', cone: p.cone || '' },
+      bisqueFiring: fire.bisque,
+      glazeFiring: fire.glaze,
       dates: {
         made: p.dateMade || '',
         bisqueFired: p.dateBisque || '',
@@ -78,7 +86,8 @@
   /** Read the fields shared by piece.json and index entries (tolerates hand edits). */
   function fromDescription(j) {
     const d = j.dates || {};
-    const f = j.firing || {};
+    const b = j.bisqueFiring || {};
+    const g = j.glazeFiring || j.firing || {}; // older files had one "firing", for the glaze firing
     return {
       id: str(j.id),
       title: str(j.title).trim() || 'Untitled',
@@ -86,8 +95,10 @@
       clays: Array.isArray(j.clays) ? j.clays.map(str).filter(Boolean) : (str(j.clayBody) ? [str(j.clayBody)] : []),
       method: fromLabel(METHODS, j.formingMethod),
       glazes: Array.isArray(j.glazes) ? j.glazes.map(str).filter(Boolean) : [],
-      firingType: str(f.type),
-      cone: str(f.cone),
+      bisqueFiringType: str(b.type),
+      bisqueCone: str(b.cone),
+      glazeFiringType: str(g.type),
+      glazeCone: str(g.cone),
       dateMade: str(d.made),
       dateBisque: str(d.bisqueFired),
       dateGlazed: str(d.glazeFired),

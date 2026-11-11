@@ -125,34 +125,37 @@
         </div>
       </fieldset>
 
-      <div class="field">
-        <span id="glazeLabel">Glazes</span>
-        <div class="tag-picker" id="glazePicker" aria-labelledby="glazeLabel"></div>
-      </div>
+      <section class="form-section" aria-labelledby="bisqueHead">
+        <h3 id="bisqueHead">Bisque</h3>
+        <div class="field-row">
+          <label class="field">
+            <span>Firing type</span>
+            <select name="bisqueFiringType"><option value="">—</option></select>
+          </label>
+          <label class="field">
+            <span>Cone</span>
+            <select name="bisqueCone"><option value="">—</option></select>
+          </label>
+        </div>
+      </section>
 
-      <div class="field-row">
-        <label class="field">
-          <span>Firing type</span>
-          <select name="firingType">
-            <option value="">—</option>
-            <option>Electric (oxidation)</option>
-            <option>Gas (reduction)</option>
-            <option>Gas (oxidation)</option>
-            <option>Raku</option>
-            <option>Wood</option>
-            <option>Soda</option>
-            <option>Salt</option>
-            <option>Pit / smoke</option>
-            <option>Other</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Cone</span>
-          <select name="cone">
-            <option value="">—</option>
-          </select>
-        </label>
-      </div>
+      <section class="form-section" aria-labelledby="glazeHead">
+        <h3 id="glazeHead">Glaze</h3>
+        <div class="field">
+          <span id="glazeLabel">Glazes</span>
+          <div class="tag-picker" id="glazePicker" aria-labelledby="glazeLabel"></div>
+        </div>
+        <div class="field-row">
+          <label class="field">
+            <span>Firing type</span>
+            <select name="glazeFiringType"><option value="">—</option></select>
+          </label>
+          <label class="field">
+            <span>Cone</span>
+            <select name="glazeCone"><option value="">—</option></select>
+          </label>
+        </div>
+      </section>
 
       <fieldset class="field">
         <legend>Stage</legend>
@@ -259,7 +262,7 @@
 
       <div class="panel" id="customFieldsPanel">
         <h2>Custom fields</h2>
-        <p class="muted">Add your own fields to every piece, such as kiln, weight, price or who it's for. They sync with your other devices and appear in each piece's <code>piece.json</code>.</p>
+        <p class="muted">Add your own fields to every piece, such as kiln, weight, price or who it's for. Text fields can remember the values you type and offer them in a drop-down. Tap the pencil to rename a field, change its type or edit its list. They sync with your other devices and appear in each piece's <code>piece.json</code>.</p>
         <ul class="cf-list" id="cfList"></ul>
         <form class="cf-add" id="cfAddForm">
           <div class="field-row">
@@ -271,6 +274,9 @@
               <span>Type</span>
               <select id="cfType"></select>
             </label>
+          </div>
+          <div class="field" id="cfRememberRow">
+            <label class="yesno"><input type="checkbox" id="cfRemember" checked><b>Remember values for a drop-down, like glazes</b></label>
           </div>
           <label class="field" id="cfOptionsRow" hidden>
             <span>Choices, separated by commas</span>
