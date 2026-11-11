@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Pottery Log</title>
   <meta name="description" content="Log your pottery pieces from greenware to done.">
@@ -198,6 +199,11 @@
               <button class="btn btn-secondary btn-small" id="pickFolderBtn">Choose folder</button>
               <button class="btn btn-ghost btn-small" id="newFolderBtn">New folder</button>
             </div>
+            <div id="foundFolders" hidden>
+              <p class="muted small">Pottery Log folders already in your Drive:</p>
+              <div class="folder-actions" id="foundFolderBtns"></div>
+            </div>
+            <p class="muted small" id="pickerHint" hidden>If Google's folder picker showed an error such as "The API developer key is invalid", this browser is blocking it. Some browsers, such as Comet, do. Use <strong>New folder</strong>, or choose the folder once in Chrome; after that it's listed here on every browser.</p>
             <form class="new-folder" id="newFolderForm" hidden>
               <label class="field">
                 <span>New folder name</span>

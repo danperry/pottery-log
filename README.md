@@ -151,6 +151,9 @@ Tap the cloud icon in the top bar.
 - **Drive folder** is where your pieces go. Set it once on each device:
   - **Choose folder** opens Google's folder picker. Pick any folder in My Drive or a shared drive. Picking it gives the app access to that one folder, and nothing else in your Drive.
   - **New folder** creates a folder with the name you type (default `Pottery Log`) at the top of My Drive.
+  - **Pottery Log folders already in your Drive** are listed as buttons once you're signed in, so on a new device or browser you can tap the existing folder without opening the picker.
+
+  Some browsers (for example Comet) block Google's folder picker, which then says "The API developer key is invalid". Use **New folder** there, or pick the folder once in Chrome; after that it's listed on every browser.
 - **Sync now** brings this device and the folder up to date with each other. The app also syncs by itself whenever it opens, when you come back to it after a minute or more, and when the connection returns.
 - **Sync automatically whenever I save** (offered next to the sign-in button, and switchable later) also syncs after every save, stage change or delete. The cloud icon pulses while it runs and shows a dot when there are changes not yet in Drive.
 

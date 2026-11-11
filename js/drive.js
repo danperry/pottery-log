@@ -352,16 +352,36 @@
               const f = { id: doc[gp.Document.ID], name: doc[gp.Document.NAME] };
               setFolderChoice(f);
               resolve(f);
-            } else if (action === gp.Action.CANCEL) {
+            } else if (action === gp.Action.CANCEL || action === 'error') {
               resolve(null);
             }
           });
         if (apiKey) builder.setDeveloperKey(apiKey);
         if (appId) builder.setAppId(appId);
+        // Tell the picker which site opened it, so the key's website restriction can be checked
+        // even in browsers that send a shortened Referer.
+        builder.setOrigin(location.protocol + '//' + location.host);
         if (window.innerWidth < 640) builder.setSize(window.innerWidth, window.innerHeight);
         builder.build().setVisible(true);
       });
     },
+
+    /** Folders this app can already see that hold a Pottery Log (they have its index file). */
+    async findLibraries() {
+      const idx = await listFiles("appProperties has { key='potteryLog' and value='index' } and trashed = false", 'id, parents');
+      const out = [];
+      for (const pid of new Set(idx.map((f) => (f.parents || [])[0]).filter(Boolean))) {
+        try {
+          const res = await api('/files/' + encodeURIComponent(pid) + '?fields=id,name,trashed&' + ALL_DRIVES);
+          const f = await res.json();
+          if (!f.trashed) out.push({ id: f.id, name: f.name });
+        } catch (err) { if (err.reconnect) throw err; }
+      }
+      return out;
+    },
+
+    /** Use a folder found by findLibraries() as the sync folder. */
+    useFolder(f) { setFolderChoice(f); },
 
     async findDataFile(folderId) {
       const files = await listFiles(
