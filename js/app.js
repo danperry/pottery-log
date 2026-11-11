@@ -572,6 +572,7 @@
 
   /* ---------- detail view ---------- */
 
+  let showLastPhoto = false; // after adding photos from the piece view, show the newest
   async function renderDetail(id) {
     const p = await DB.getPiece(id);
     if (!p || p.deleted) { toast('That piece was not found.'); return nav('#/', true); }
@@ -603,12 +604,55 @@
       gallery.replaceChildren(...imgs.filter(Boolean));
       if (ids.length > 1) {
         const dots = el('div', { class: 'gallery-dots' }, ids.map((_, i) => el('span', { class: i === 0 ? 'on' : '' })));
-        gallery.after(dots);
-        gallery.addEventListener('scroll', () => {
-          const i = Math.round(gallery.scrollLeft / gallery.clientWidth);
+        gallery.parentElement.after(dots);
+        // Arrows, so the carousel also works with a mouse.
+        const prev = $('#galleryPrev'); const next = $('#galleryNext');
+        const at = () => Math.round(gallery.scrollLeft / gallery.clientWidth);
+        const go = (i) => gallery.scrollTo({ left: i * gallery.clientWidth, behavior: 'smooth' });
+        const update = () => {
+          const i = at();
           [...dots.children].forEach((d, j) => d.classList.toggle('on', i === j));
-        }, { passive: true });
+          prev.disabled = i <= 0;
+          next.disabled = i >= gallery.children.length - 1;
+        };
+        prev.hidden = false; next.hidden = false;
+        prev.onclick = () => go(at() - 1);
+        next.onclick = () => go(at() + 1);
+        gallery.addEventListener('scroll', update, { passive: true });
+        if (showLastPhoto) { showLastPhoto = false; gallery.scrollLeft = gallery.scrollWidth; }
+        update();
       }
+    }
+
+    // Add photos straight from the piece view (saved and synced like an edit).
+    if (!p.stub) {
+      $('#galleryAdd').hidden = false;
+      $('#detailPhotoInput').addEventListener('change', async (e) => {
+        const files = [...e.target.files];
+        e.target.value = '';
+        if (!files.length) return;
+        toast(files.length === 1 ? 'Adding photo…' : 'Adding ' + files.length + ' photos…', 1500);
+        const added = [];
+        for (const file of files) {
+          try {
+            const { blob, thumb } = await processPhoto(file);
+            const pid = DB.uid();
+            await DB.putPhoto({ id: pid, blob, thumb, type: blob.type, addedAt: Date.now() });
+            added.push(pid);
+          } catch (err) {
+            toast(err.message || 'Could not add that photo.');
+          }
+        }
+        if (!added.length) return;
+        const fresh = await DB.getPiece(p.id); // the latest copy, in case a sync updated it meanwhile
+        if (!fresh || fresh.deleted) { DB.deletePhotos(added); return; }
+        fresh.photoIds = [...(fresh.photoIds || []), ...added];
+        fresh.updatedAt = Date.now();
+        await DB.putPiece(fresh);
+        markChanged();
+        toast(added.length === 1 ? 'Photo added' : added.length + ' photos added');
+        if (location.hash === here) { showLastPhoto = true; route(); }
+      });
     }
 
     $('#dTitle').textContent = p.title || 'Untitled';

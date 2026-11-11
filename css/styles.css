@@ -184,6 +184,14 @@ main {
 .gallery img { flex: none; width: 100%; max-height: 62vh; aspect-ratio: 4 / 3; object-fit: cover; scroll-snap-align: center; cursor: zoom-in; }
 .gallery.single img { aspect-ratio: auto; object-fit: contain; max-height: 62vh; }
 .gallery .no-photo { width: 100%; height: 160px; display: grid; place-items: center; color: var(--muted); }
+.gallery-wrap { position: relative; }
+.gallery-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .45); color: #fff; cursor: pointer; padding: 0; }
+.gallery-nav:hover { background: rgba(0, 0, 0, .65); }
+.gallery-nav:disabled { opacity: 0; pointer-events: none; }
+.gallery-nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.gallery-nav.prev { left: 10px; }
+.gallery-nav.next { right: 10px; }
+.gallery-add { display: flex; justify-content: center; padding: 10px 16px 0; }
 .gallery-dots { display: flex; justify-content: center; gap: 6px; padding: 8px 0 0; }
 .gallery-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
 .gallery-dots span.on { background: var(--accent); }

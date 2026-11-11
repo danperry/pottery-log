@@ -4,6 +4,7 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework. 
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
+- **Photos** swipe on a phone, or use the arrows on a computer. **Add photos** under the photos adds more without opening Edit.
 - **Optional sync with your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive. You sign in once and stay connected, thanks to a tiny sign-in Worker on Cloudflare's free tier (`worker/`).
 - **Installable** on Android (and desktop Chrome) through the web app manifest, and it opens offline thanks to a small service worker.
 

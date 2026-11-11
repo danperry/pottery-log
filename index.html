@@ -80,7 +80,17 @@
 
   <template id="tpl-detail">
     <article class="detail-view">
-      <div class="gallery" id="gallery"></div>
+      <div class="gallery-wrap">
+        <div class="gallery" id="gallery"></div>
+        <button type="button" class="gallery-nav prev" id="galleryPrev" aria-label="Previous photo" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <button type="button" class="gallery-nav next" id="galleryNext" aria-label="Next photo" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <div class="gallery-add" id="galleryAdd" hidden>
+        <label class="btn btn-secondary btn-small">
+          <input type="file" accept="image/*" multiple id="detailPhotoInput" hidden>
+          Add photos
+        </label>
+      </div>
       <div class="detail-body">
         <div class="detail-head">
           <h2 id="dTitle"></h2>
