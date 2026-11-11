@@ -15,13 +15,10 @@
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14'];
   const PHOTO_MAX = 1600;
   const THUMB_MAX = 480;
-  const LAST_BACKUP_KEY = 'potteryLog.lastBackup';
-  const DEVICE_KEY = 'potteryLog.deviceId';
+  const LAST_SYNC_KEY = 'potteryLog.lastSync';
   const FILTER_KEY = 'potteryLog.filter';
   const AUTO_KEY = 'potteryLog.autoBackup';
   const PENDING_AUTO_KEY = 'potteryLog.pendingAutoBackup'; // choice made just before leaving for Google sign-in
-  const CHANGE_KEY = 'potteryLog.changeSeq';   // bumped on every local change
-  const BACKED_KEY = 'potteryLog.backedSeq';   // change number covered by the last backup
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const app = $('#app');
@@ -41,12 +38,6 @@
       if (val === null) localStorage.removeItem(key);
       else localStorage.setItem(key, JSON.stringify(val));
     } catch (e) { return null; }
-  }
-
-  function deviceId() {
-    let id = store(DEVICE_KEY);
-    if (!id) { id = DB.uid(); store(DEVICE_KEY, id); }
-    return id;
   }
 
   function today() {
@@ -118,6 +109,36 @@
     const p = await DB.getPhoto(id);
     if (!p) return null;
     return blobUrl(which === 'full' ? p.blob : (p.thumb || p.blob));
+  }
+
+  // Photos of pieces synced from another device are downloaded the first time they're shown,
+  // a few at a time.
+  const photoFetches = new Map();
+  let photoSlots = 3;
+  const photoWaiters = [];
+  async function fetchPhotoOnce(piece, pid) {
+    const fileId = piece.sync && piece.sync.photoFiles && piece.sync.photoFiles[pid];
+    if (!fileId || !Drive.isSignedIn() || !navigator.onLine) return;
+    if (!photoFetches.has(pid)) {
+      photoFetches.set(pid, (async () => {
+        if (photoSlots === 0) await new Promise((res) => photoWaiters.push(res));
+        photoSlots--;
+        try { await Sync.fetchPhoto(pid, fileId); } catch (e) { /* stays a placeholder */ } finally {
+          photoSlots++;
+          const next = photoWaiters.shift(); if (next) next();
+          photoFetches.delete(pid);
+        }
+      })());
+    }
+    return photoFetches.get(pid);
+  }
+
+  /** Like photoUrl, but downloads the photo from Drive if it isn't on this device yet. */
+  async function piecePhotoUrl(piece, pid, which) {
+    const u = await photoUrl(pid, which);
+    if (u) return u;
+    await fetchPhotoOnce(piece, pid);
+    return photoUrl(pid, which);
   }
 
   /* ---------- image processing ---------- */
@@ -211,7 +232,7 @@
   async function renderList() {
     setChrome({ title: 'Pottery Log', back: false, fab: true });
     mount('tpl-list');
-    const pieces = await DB.allPieces();
+    const pieces = (await DB.allPieces()).filter((p) => !p.deleted);
     pieces.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
     let filter = store(FILTER_KEY) || 'all';
@@ -249,7 +270,7 @@
       listEl.replaceChildren(...shown.map((p) => {
         const thumb = el('div', { class: 'thumb', html: ICON_POT });
         if (p.photoIds && p.photoIds[0]) {
-          photoUrl(p.photoIds[0]).then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
+          piecePhotoUrl(p, p.photoIds[0]).then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
         }
         const sub = [p.clayBody, (p.glazes || []).join(', ')].filter(Boolean).join(' · ') || METHOD_LABEL[p.method] || '';
         return el('li', null, el('button', { class: 'card', onclick: () => nav('#/piece/' + encodeURIComponent(p.id)) },
@@ -270,18 +291,30 @@
 
   async function renderDetail(id) {
     const p = await DB.getPiece(id);
-    if (!p) { toast('That piece was not found.'); return nav('#/', true); }
+    if (!p || p.deleted) { toast('That piece was not found.'); return nav('#/', true); }
     setChrome({ title: p.title || 'Untitled', back: true, fab: false });
     mount('tpl-detail');
+    const here = location.hash;
+
+    // A piece synced from another device shows its summary first; notes and photos load now.
+    if (p.stub) {
+      const note = el('p', { class: 'muted small loading-note' }, 'Loading notes and photos from Google Drive…');
+      $('#dTitle').after(note);
+      loadOnDemand(p.id).then(() => { if (location.hash === here) route(); }).catch((err) => {
+        note.textContent = err.reconnect ? 'Reconnect Google Drive (cloud icon) to see this piece\'s notes and photos.'
+          : !navigator.onLine ? 'You\'re offline. Notes and photos will load when you\'re back online.'
+          : 'Could not load this piece from Google Drive: ' + err.message;
+      });
+    }
 
     const gallery = $('#gallery');
     const ids = p.photoIds || [];
-    if (!ids.length) {
+    if (!ids.length || p.stub) {
       gallery.replaceChildren(el('div', { class: 'no-photo', html: ICON_POT }));
     } else {
       gallery.classList.toggle('single', ids.length === 1);
       const imgs = await Promise.all(ids.map(async (pid) => {
-        const u = await photoUrl(pid, 'full');
+        const u = await piecePhotoUrl(p, pid, 'full');
         return u ? el('img', { src: u, alt: p.title || 'Photo', onclick: () => lightbox(u) }) : null;
       }));
       gallery.replaceChildren(...imgs.filter(Boolean));
@@ -304,7 +337,7 @@
 
     const next = STAGES[idx + 1];
     const adv = $('#advanceBtn');
-    if (next) {
+    if (next && !p.stub) {
       adv.hidden = false;
       adv.textContent = 'Mark as ' + next.label.toLowerCase();
       adv.onclick = async () => {
@@ -333,10 +366,15 @@
 
     if (p.notes) { $('#dNotesWrap').hidden = false; $('#dNotes').textContent = p.notes; }
 
+    $('#editBtn').hidden = !!p.stub;
     $('#editBtn').onclick = () => nav('#/edit/' + encodeURIComponent(p.id));
     $('#deleteBtn').onclick = async () => {
-      if (!confirm('Delete "' + (p.title || 'Untitled') + '" and its photos? This cannot be undone.')) return;
+      const inDrive = p.sync && p.sync.folderId;
+      if (!confirm('Delete "' + (p.title || 'Untitled') + '" and its photos?' +
+        (inDrive ? ' Its folder in Google Drive will be moved to the trash.' : ' This cannot be undone.'))) return;
       await DB.deletePiece(p.id);
+      // Remember the delete so other devices delete it too.
+      if (p.sync) await DB.putPiece({ id: p.id, title: p.title, deleted: true, updatedAt: Date.now(), sync: p.sync });
       markChanged();
       toast('Piece deleted');
       nav('#/', true);
@@ -358,7 +396,16 @@
 
   async function renderEdit(id) {
     const existing = id ? await DB.getPiece(id) : null;
-    if (id && !existing) { toast('That piece was not found.'); return nav('#/', true); }
+    if (id && (!existing || existing.deleted)) { toast('That piece was not found.'); return nav('#/', true); }
+    if (existing && existing.stub) { // synced from another device: load its details first
+      setChrome({ title: 'Edit piece', back: true, fab: false });
+      app.replaceChildren(el('p', { class: 'muted center loading-note' }, 'Loading from Google Drive…'));
+      const here = location.hash;
+      return loadOnDemand(id).then(() => { if (location.hash === here) route(); }).catch((err) => {
+        toast(err.reconnect ? 'Reconnect Google Drive to edit this piece.' : !navigator.onLine ? 'You\'re offline. This piece will load when you\'re back online.' : err.message, 4000);
+        nav('#/piece/' + encodeURIComponent(id), true);
+      });
+    }
     const isNew = !existing;
     const piece = existing ? structuredClone(existing) : {
       id: DB.uid(), title: '', photoIds: [], clayBody: '', method: 'wheel', glazes: [],
@@ -375,7 +422,7 @@
     const f = form.elements;
 
     // Autocomplete from previous pieces.
-    const all = await DB.allPieces();
+    const all = (await DB.allPieces()).filter((p) => !p.deleted);
     const uniq = (arr) => [...new Set(arr.filter(Boolean).map((s) => s.trim()))].sort((a, b) => a.localeCompare(b));
     $('#clayList').replaceChildren(...uniq(all.map((p) => p.clayBody)).map((v) => el('option', { value: v })));
     $('#glazeList').replaceChildren(...uniq(all.flatMap((p) => p.glazes || [])).map((v) => el('option', { value: v })));
@@ -427,7 +474,7 @@
     const grid = $('#photoGrid');
     async function drawPhotos() {
       const items = await Promise.all(piece.photoIds.map(async (pid, i) => {
-        const u = await photoUrl(pid);
+        const u = await piecePhotoUrl(piece, pid);
         return el('div', { class: 'photo-item' },
           u ? el('img', { src: u, alt: 'Photo ' + (i + 1) }) : null,
           i === 0 && piece.photoIds.length > 1 ? el('span', { class: 'cover' }, 'Cover') : null,
@@ -502,12 +549,14 @@
     setChrome({ title: 'Backup', back: true, fab: false });
     mount('tpl-backup');
 
-    const pieces = await DB.allPieces();
+    const pieces = (await DB.allPieces()).filter((p) => !p.deleted);
     const photoIds = await DB.allPhotoIds();
     const est = await DB.estimate();
+    const stubs = pieces.filter((p) => p.stub).length;
     $('#localStats').textContent = pieces.length + (pieces.length === 1 ? ' piece' : ' pieces') + ', ' +
       photoIds.length + (photoIds.length === 1 ? ' photo' : ' photos') +
-      (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used' : '');
+      (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used' : '') +
+      (stubs ? '. ' + stubs + ' synced ' + (stubs === 1 ? 'piece loads its' : 'pieces load their') + ' notes and photos when opened.' : '');
     const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
     $('#persistLabel').textContent = persisted
       ? 'Storage is marked persistent, so the browser won\'t clear it on its own.'
@@ -527,10 +576,11 @@
       $('#folderLabel').textContent = folder ? folder.name : 'Not chosen yet';
       $('#pickFolderBtn').textContent = folder ? 'Change folder' : 'Choose folder';
       $('#autoBackupToggle').checked = store(AUTO_KEY) === true;
-      const last = store(LAST_BACKUP_KEY);
-      let label = last ? 'Last backup: ' + fmtDateTime(last.at) + '.' : 'Not backed up yet from this device.';
-      if (last && isDirty()) label += ' You have changes since then.';
-      $('#lastBackupLabel').textContent = label;
+      const last = store(LAST_SYNC_KEY);
+      let label = syncing ? 'Syncing…'
+        : last && folder && last.root === folder.id ? 'Last synced: ' + fmtDateTime(last.at) + '.' : 'Not synced yet from this device.';
+      if (!syncing && pendingCount) label += ' ' + pendingCount + (pendingCount === 1 ? ' change is' : ' changes are') + ' waiting to sync.';
+      $('#lastSyncLabel').textContent = label;
       updateBadge();
     }
     draw();
@@ -538,18 +588,18 @@
     const progress = $('#driveProgress');
     const bar = $('#driveProgressBar');
     const ptext = $('#driveProgressText');
-    const buttons = ['#backupBtn', '#restoreBtn', '#signOutBtn', '#pickFolderBtn', '#newFolderBtn'].map((s) => $(s));
+    const buttons = ['#syncBtn', '#signOutBtn', '#pickFolderBtn', '#newFolderBtn'].map((s) => $(s));
     function busy(on, text, frac) {
       buttons.forEach((b) => { b.disabled = on; });
       progress.hidden = !on;
       if (on) { ptext.textContent = text || ''; bar.style.width = Math.round((frac || 0) * 100) + '%'; }
     }
 
-    // Redraw when a background backup finishes while this page is open.
+    // Redraw when a background sync finishes while this page is open.
     onBackupStateChange = draw;
 
     $('#signInBtn').addEventListener('click', () => {
-      // Remember the auto-backup choice across the trip to Google and back.
+      // Remember the auto-sync choice across the trip to Google and back.
       if (!Drive.needsReconnect()) {
         try { sessionStorage.setItem(PENDING_AUTO_KEY, $('#autoBackupConnect').checked ? '1' : '0'); } catch (e) { /* ignore */ }
       }
@@ -561,10 +611,17 @@
       Drive.resolveFolder().then(draw).catch((err) => { if (err.reconnect) draw(); });
     }
 
+    async function afterFolderChange(name, verb) {
+      await refreshPending();
+      draw();
+      toast(verb + ' “' + name + '”. Syncing…');
+      runSync({ quiet: false });
+    }
+
     $('#pickFolderBtn').addEventListener('click', async () => {
       try {
         const f = await Drive.pickFolder();
-        if (f) { folderChanged(); draw(); toast('Backups will go to “' + f.name + '”'); kickAutoBackup(); }
+        if (f) afterFolderChange(f.name, 'Syncing with');
       } catch (err) {
         draw();
         toast(err.message, 4000);
@@ -586,10 +643,7 @@
         const f = await Drive.createFolder(name);
         busy(false);
         newForm.hidden = true;
-        folderChanged();
-        draw();
-        toast('Created “' + f.name + '” in My Drive');
-        kickAutoBackup();
+        afterFolderChange(f.name, 'Created');
       } catch (err) {
         busy(false);
         draw();
@@ -601,13 +655,13 @@
       store(AUTO_KEY, e.target.checked);
       updateBadge();
       if (e.target.checked) {
-        toast(Drive.getFolder() ? 'Will back up after every save' : 'Choose a backup folder to start backing up');
-        kickAutoBackup();
+        toast(Drive.getFolder() ? 'Will sync after every save' : 'Choose a Drive folder to start syncing');
+        if (pendingCount) runSync();
       }
     });
 
     $('#signOutBtn').addEventListener('click', async () => {
-      if (!confirm('Disconnect Google Drive? Your backups stay in Drive and your pieces stay on this device.')) return;
+      if (!confirm('Disconnect Google Drive? Your files stay in Drive and your pieces stay on this device. Pieces from Drive that haven\'t been opened here yet will show only their summary until you reconnect.')) return;
       busy(true, 'Disconnecting…', 0.5);
       const { revoked } = await Drive.disconnect();
       busy(false);
@@ -616,191 +670,123 @@
         : 'Disconnected on this device. Google could not be reached, so also remove access at myaccount.google.com/connections.', revoked ? 2600 : 7000);
     });
 
-    $('#backupBtn').addEventListener('click', async () => {
+    $('#syncBtn').addEventListener('click', async () => {
       try {
-        await queueTask(() => backup((t, f) => busy(true, t, f)));
+        const stats = await runSync({ quiet: true, throws: true, onProgress: (t) => busy(true, t, 0.5) });
         busy(false);
         draw();
-        toast('Backed up to Google Drive');
+        toast(syncSummary(stats) || 'Everything is up to date');
       } catch (err) {
         busy(false);
         draw();
-        if (err.message !== 'cancelled') toast(err.message, 4000);
-      }
-    });
-
-    $('#restoreBtn').addEventListener('click', async () => {
-      try {
-        const n = await queueTask(() => restore((t, f) => busy(true, t, f)));
-        busy(false);
-        toast('Restored ' + n + (n === 1 ? ' piece' : ' pieces'));
-        renderBackup();
-      } catch (err) {
-        busy(false);
-        draw();
-        if (err.message !== 'cancelled') toast(err.message, 4000);
+        toast(err.message, 4000);
       }
     });
   }
 
-  const NO_FOLDER = 'Choose or create a backup folder first.';
+  const NO_FOLDER = 'Choose or create a Google Drive folder first.';
 
-  /* ---------- automatic backup ---------- */
+  /* ---------- sync with Google Drive ---------- */
 
   let onBackupStateChange = null;
-  let autoQueued = false;
+  let syncQueued = false;
   let syncing = false;
+  let pendingCount = 0;
   let taskChain = Promise.resolve();
 
-  /** Run Drive tasks one at a time so manual and automatic backups never overlap. */
+  /** Run Drive tasks one at a time so manual and automatic syncs never overlap. */
   function queueTask(fn) {
     const p = taskChain.then(fn, fn);
     taskChain = p.catch(() => {});
     return p;
   }
 
-  const autoOn = () => Drive.configured && Drive.isSignedIn() && store(AUTO_KEY) === true;
-  const isDirty = () => (store(CHANGE_KEY) || 0) > (store(BACKED_KEY) || 0);
+  const connected = () => Drive.configured && Drive.isSignedIn();
+  const autoOn = () => connected() && store(AUTO_KEY) === true;
+
+  async function refreshPending() {
+    const f = Drive.getFolder();
+    pendingCount = connected() && f ? await Sync.pendingCount(f.id) : 0;
+    updateBadge();
+  }
 
   function updateBadge() {
-    const pending = Drive.configured && ((Drive.isSignedIn() && isDirty()) || Drive.needsReconnect());
+    const pending = Drive.configured && ((Drive.isSignedIn() && pendingCount > 0) || Drive.needsReconnect());
     backupNavBtn.classList.toggle('dirty', pending && !syncing);
     backupNavBtn.classList.toggle('syncing', syncing);
-    backupNavBtn.setAttribute('aria-label', syncing ? 'Backing up…'
+    backupNavBtn.setAttribute('aria-label', syncing ? 'Syncing…'
       : Drive.needsReconnect() ? 'Backup and settings (Google Drive needs reconnecting)'
-      : pending ? 'Backup and settings (changes not backed up)' : 'Backup and settings');
+      : pending ? 'Backup and settings (changes not synced yet)' : 'Backup and settings');
   }
 
-  /** A new backup folder starts empty, so everything needs backing up again. */
-  function folderChanged() {
-    store(BACKED_KEY, 0);
-    if (!(store(CHANGE_KEY) > 0)) store(CHANGE_KEY, 1);
-    updateBadge();
-  }
-
+  /** Call after any local change to a piece. */
   function markChanged() {
-    store(CHANGE_KEY, (store(CHANGE_KEY) || 0) + 1);
-    updateBadge();
-    kickAutoBackup();
+    refreshPending().then(() => { if (autoOn() && pendingCount) runSync(); });
   }
 
-  async function kickAutoBackup() {
-    if (!autoOn() || !isDirty() || autoQueued) return;
-    autoQueued = true;
+  function syncSummary(st) {
+    if (!st) return '';
+    const parts = [];
+    if (st.pulled) parts.push(st.pulled + (st.pulled === 1 ? ' piece' : ' pieces') + ' updated from Drive');
+    if (st.removed) parts.push(st.removed + ' removed');
+    if (st.pushed) parts.push(st.pushed + ' saved to Drive');
+    return parts.join(', ');
+  }
+
+  /**
+   * Sync this device with the Drive folder: pull newer pieces, push local changes.
+   * opts.quiet: no toast unless something came from Drive. opts.throws: reject on errors.
+   */
+  function runSync(opts = {}) {
+    if (!connected() || !Drive.getFolder()) {
+      return opts.throws ? Promise.reject(new Error(connected() ? NO_FOLDER : 'Sign in to Google Drive first.')) : Promise.resolve(null);
+    }
+    if (syncQueued && !opts.throws) return Promise.resolve(null); // one already waiting will cover this
+    syncQueued = true;
     return queueTask(async () => {
-      autoQueued = false;
-      if (!autoOn() || !isDirty() || !Drive.getFolder()) return;
+      syncQueued = false;
       syncing = true; updateBadge();
-      let ok = false;
+      let stats = null;
+      let failed = null;
       try {
-        await backup(() => {}, { auto: true });
-        ok = true;
-        toast('Backed up to Google Drive', 1600);
+        const chosen = await Drive.resolveFolder();
+        if (!chosen) throw new Error('The Drive folder was deleted or can\'t be reached. ' + NO_FOLDER);
+        stats = await Sync.run(chosen.id, opts.onProgress || (() => {}));
+        store(LAST_SYNC_KEY, { at: Date.now(), root: chosen.id });
       } catch (err) {
-        toast(err.reconnect ? 'Google Drive needs reconnecting. Tap the cloud icon.' : 'Automatic backup failed: ' + err.message, 5000);
+        failed = err;
       } finally {
-        syncing = false; updateBadge();
+        syncing = false;
+        await refreshPending().catch(() => {});
         if (onBackupStateChange && location.hash.startsWith('#/backup')) onBackupStateChange();
       }
-      // Pick up changes made while uploading. After a failure, wait for the next save,
-      // launch or reconnect instead of retrying in a loop.
-      if (ok && isDirty()) kickAutoBackup();
-    });
-  }
-
-  async function backup(onProgress, opts = {}) {
-    const seq = store(CHANGE_KEY) || 0;
-    onProgress('Checking backup folder…', 0.02);
-    const chosen = await Drive.resolveFolder();
-    if (!chosen) throw new Error(NO_FOLDER);
-    const folder = chosen.id;
-    const dataFile = await Drive.findDataFile(folder);
-    const last = store(LAST_BACKUP_KEY);
-
-    if (dataFile) {
-      onProgress('Checking existing backup…', 0.05);
-      const remote = await Drive.readData(dataFile.id).catch(() => null);
-      if (remote && remote.deviceId && remote.deviceId !== deviceId() && (!last || remote.exportedAt > last.at)) {
-        if (opts.auto) throw new Error('Drive has a newer backup from another device. Open Backup to choose what to keep.');
-        const ok = confirm('Google Drive has a newer backup made on another device (' +
-          fmtDateTime(remote.exportedAt) + ', ' + (remote.pieces || []).length + ' pieces).\n\n' +
-          'Backing up now will replace it with this device\'s pieces. Continue?\n\n' +
-          'Tip: choose Cancel, then "Restore from Drive" to get that backup instead.');
-        if (!ok) throw new Error('cancelled');
+      if (failed) {
+        if (opts.throws) throw failed;
+        if (navigator.onLine || failed.reconnect) {
+          toast(failed.reconnect ? 'Google Drive needs reconnecting. Tap the cloud icon.' : 'Sync failed: ' + failed.message, 5000);
+        }
+        return null; // wait for the next save, launch or reconnect instead of retrying in a loop
       }
-    }
-
-    const pieces = await DB.allPieces();
-    const needed = new Set(pieces.flatMap((p) => p.photoIds || []));
-    onProgress('Checking photos…', 0.08);
-    const remotePhotos = await Drive.listPhotos(folder);
-    const toUpload = [...needed].filter((id) => !remotePhotos.has(id));
-
-    let done = 0;
-    for (const pid of toUpload) {
-      onProgress('Uploading photo ' + (done + 1) + ' of ' + toUpload.length + '…', 0.1 + 0.8 * (done / toUpload.length));
-      const photo = await DB.getPhoto(pid);
-      if (photo) remotePhotos.set(pid, await Drive.uploadPhoto(folder, pid, photo.blob));
-      done++;
-    }
-
-    onProgress('Saving log…', 0.92);
-    const at = Date.now();
-    await Drive.writeData(folder, dataFile && dataFile.id, {
-      app: 'pottery-log', version: 1, exportedAt: at, deviceId: deviceId(), pieces,
+      if (stats.pulled || stats.removed) {
+        if (!opts.throws) toast(syncSummary(stats), 2500);
+        // Show what came from Drive, unless a form is being edited.
+        if (!/^#\/(edit|new|backup)/.test(location.hash)) route();
+      } else if (stats.pushed && !opts.quiet && !opts.throws) {
+        toast('Synced with Google Drive', 1600);
+      }
+      if (pendingCount && autoOn()) runSync({ quiet: true }); // changes made while syncing
+      return stats;
     });
-
-    // Remove photos that no longer belong to any piece.
-    const orphans = [...remotePhotos.entries()].filter(([pid]) => !needed.has(pid));
-    for (const [, fileId] of orphans) await Drive.deleteFile(fileId).catch(() => {});
-
-    store(LAST_BACKUP_KEY, { at, pieces: pieces.length });
-    store(BACKED_KEY, Math.max(seq, store(BACKED_KEY) || 0));
-    updateBadge();
-    onProgress('Done', 1);
   }
 
-  async function restore(onProgress) {
-    onProgress('Looking for a backup…', 0.02);
-    const chosen = await Drive.resolveFolder();
-    if (!chosen) throw new Error(NO_FOLDER);
-    const folder = chosen.id;
-    const dataFile = await Drive.findDataFile(folder);
-    if (!dataFile) throw new Error('No Pottery Log backup was found in “' + chosen.name + '”.');
-    const data = await Drive.readData(dataFile.id);
-    if (!data || data.app !== 'pottery-log' || !Array.isArray(data.pieces)) throw new Error('The backup file looks damaged.');
-
-    const localCount = (await DB.allPieces()).length;
-    const ok = confirm('Restore ' + data.pieces.length + ' pieces from the backup of ' + fmtDateTime(data.exportedAt) + '?' +
-      (localCount ? '\n\nThis replaces the ' + localCount + ' pieces currently on this device.' : ''));
-    if (!ok) throw new Error('cancelled');
-
-    const needed = new Set(data.pieces.flatMap((p) => p.photoIds || []));
-    const have = new Set(await DB.allPhotoIds());
-    const remotePhotos = await Drive.listPhotos(folder);
-    const toDownload = [...needed].filter((id) => !have.has(id) && remotePhotos.has(id));
-
-    let done = 0;
-    for (const pid of toDownload) {
-      onProgress('Downloading photo ' + (done + 1) + ' of ' + toDownload.length + '…', 0.05 + 0.9 * (done / toDownload.length));
-      const blob = await Drive.downloadBlob(remotePhotos.get(pid));
-      const typed = blob.type ? blob : new Blob([blob], { type: 'image/jpeg' });
-      let thumb = null;
-      try { thumb = await makeThumb(typed); } catch (e) { /* use full image */ }
-      await DB.putPhoto({ id: pid, blob: typed, thumb, type: typed.type, addedAt: Date.now() });
-      done++;
+  /** Load a synced piece's notes and photos the first time it's opened on this device. */
+  const loading = new Map();
+  function loadOnDemand(id) {
+    if (!connected()) return Promise.reject(Object.assign(new Error('Not connected'), { reconnect: true }));
+    if (!loading.has(id)) {
+      loading.set(id, Sync.loadPiece(id).finally(() => loading.delete(id)));
     }
-
-    // Drop references to photos that could not be found in Drive.
-    const available = new Set([...have, ...toDownload].filter((id) => needed.has(id)));
-    const pieces = data.pieces.map((p) => ({ ...p, photoIds: (p.photoIds || []).filter((id) => available.has(id)) }));
-    onProgress('Saving…', 0.97);
-    await DB.replaceAllPieces(pieces, available);
-    store(LAST_BACKUP_KEY, { at: data.exportedAt, pieces: pieces.length });
-    store(BACKED_KEY, store(CHANGE_KEY) || 0); // device now matches the backup
-    updateBadge();
-    onProgress('Done', 1);
-    return pieces.length;
+    return loading.get(id);
   }
 
   /* ---------- boot ---------- */
@@ -823,8 +809,9 @@
     window.addEventListener('hashchange', route);
     route();
 
-    if (store(CHANGE_KEY) == null && !store(LAST_BACKUP_KEY)) store(CHANGE_KEY, 1); // data from before change tracking
-    updateBadge();
+    Sync.init({ makeThumb });
+    try { localStorage.removeItem('potteryLog.changeSeq'); localStorage.removeItem('potteryLog.backedSeq'); localStorage.removeItem('potteryLog.lastBackup'); localStorage.removeItem('potteryLog.deviceId'); } catch (e) { /* ignore */ }
+    refreshPending().catch(() => {});
 
     if (auth && auth.connected) {
       let pendingAuto = null;
@@ -836,10 +823,15 @@
       toast(AUTH_ERRORS[auth.error] || 'Google sign-in failed (' + auth.error + ').', 5000);
     }
 
-    // Finish any backup that was pending when the app was last closed.
-    if (Drive.configured && Drive.isSignedIn()) {
-      kickAutoBackup();
-      window.addEventListener('online', kickAutoBackup);
+    // Sync on open (pulls changes from other devices, pushes anything left from last time),
+    // when the connection comes back, and when returning to the app after a while.
+    if (connected()) {
+      runSync({ quiet: true });
+      window.addEventListener('online', () => runSync({ quiet: true }));
+      document.addEventListener('visibilitychange', () => {
+        const last = store(LAST_SYNC_KEY);
+        if (document.visibilityState === 'visible' && connected() && (!last || Date.now() - last.at > 60 * 1000)) runSync({ quiet: true });
+      });
     }
   }
 

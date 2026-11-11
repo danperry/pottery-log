@@ -166,17 +166,17 @@
   <template id="tpl-backup">
     <section class="backup-view">
       <div class="panel">
-        <h2>Google Drive backup</h2>
-        <p class="muted">Pieces are saved on this device. Back them up to your own Google Drive to keep them safe or move them to another device. The app can only see files it created.</p>
+        <h2>Google Drive sync</h2>
+        <p class="muted">Pieces are saved on this device. Connect your own Google Drive to keep them safe and in step across your devices. Each piece gets its own folder with its photos and a readable <code>piece.json</code>, so you can browse them in Drive without the app. The app can only see files it created.</p>
         <div id="driveUnconfigured" hidden>
           <p class="warn">Google sign-in isn't set up yet. Deploy the sign-in Worker and add its URL to <code>js/config.js</code> (see the README).</p>
         </div>
         <div id="driveSignedOut" hidden>
-          <p class="warn" id="reconnectNote" hidden>Google Drive was disconnected, either because access was removed or because it went unused for 6 months. Your pieces are safe on this device. Reconnect to keep backing up.</p>
+          <p class="warn" id="reconnectNote" hidden>Google Drive was disconnected, either because access was removed or because it went unused for 6 months. Your pieces are safe on this device. Reconnect to keep syncing.</p>
           <label class="switch-row" id="autoBackupConnectRow">
             <input type="checkbox" id="autoBackupConnect" checked>
             <span class="switch" aria-hidden="true"></span>
-            <span>Back up automatically whenever I save</span>
+            <span>Sync automatically whenever I save</span>
           </label>
           <button class="btn btn-google" id="signInBtn">
             <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.8 6C12.3 13.5 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.9-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.7-4-13.6-9.8l-7.8 6C6.6 42.6 14.6 48 24 48z"/></svg>
@@ -189,7 +189,7 @@
             <div class="folder-row">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
               <div class="folder-text">
-                <span class="muted small">Backup folder</span>
+                <span class="muted small">Drive folder</span>
                 <strong id="folderLabel">Not chosen yet</strong>
               </div>
             </div>
@@ -212,13 +212,12 @@
           <label class="switch-row">
             <input type="checkbox" id="autoBackupToggle">
             <span class="switch" aria-hidden="true"></span>
-            <span>Back up automatically whenever I save</span>
+            <span>Sync automatically whenever I save</span>
           </label>
-          <p class="muted small" id="lastBackupLabel"></p>
+          <p class="muted small" id="lastSyncLabel"></p>
           <div class="progress" id="driveProgress" hidden><div class="progress-bar" id="driveProgressBar"></div><span id="driveProgressText"></span></div>
           <div class="btn-col">
-            <button class="btn btn-primary" id="backupBtn">Back up now</button>
-            <button class="btn btn-secondary" id="restoreBtn">Restore from Drive</button>
+            <button class="btn btn-primary" id="syncBtn">Sync now</button>
             <button class="btn btn-ghost" id="signOutBtn">Disconnect</button>
           </div>
         </div>
@@ -237,6 +236,7 @@
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/drive.js"></script>
+  <script src="js/sync.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
