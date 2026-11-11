@@ -125,34 +125,37 @@
         </div>
       </fieldset>
 
-      <div class="field">
-        <span id="glazeLabel">Glazes</span>
-        <div class="tag-picker" id="glazePicker" aria-labelledby="glazeLabel"></div>
-      </div>
+      <section class="form-section" aria-labelledby="bisqueHead">
+        <h3 id="bisqueHead">Bisque</h3>
+        <div class="field-row">
+          <label class="field">
+            <span>Firing type</span>
+            <select name="bisqueFiringType"><option value="">—</option></select>
+          </label>
+          <label class="field">
+            <span>Cone</span>
+            <select name="bisqueCone"><option value="">—</option></select>
+          </label>
+        </div>
+      </section>
 
-      <div class="field-row">
-        <label class="field">
-          <span>Firing type</span>
-          <select name="firingType">
-            <option value="">—</option>
-            <option>Electric (oxidation)</option>
-            <option>Gas (reduction)</option>
-            <option>Gas (oxidation)</option>
-            <option>Raku</option>
-            <option>Wood</option>
-            <option>Soda</option>
-            <option>Salt</option>
-            <option>Pit / smoke</option>
-            <option>Other</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Cone</span>
-          <select name="cone">
-            <option value="">—</option>
-          </select>
-        </label>
-      </div>
+      <section class="form-section" aria-labelledby="glazeHead">
+        <h3 id="glazeHead">Glaze</h3>
+        <div class="field">
+          <span id="glazeLabel">Glazes</span>
+          <div class="tag-picker" id="glazePicker" aria-labelledby="glazeLabel"></div>
+        </div>
+        <div class="field-row">
+          <label class="field">
+            <span>Firing type</span>
+            <select name="glazeFiringType"><option value="">—</option></select>
+          </label>
+          <label class="field">
+            <span>Cone</span>
+            <select name="glazeCone"><option value="">—</option></select>
+          </label>
+        </div>
+      </section>
 
       <fieldset class="field">
         <legend>Stage</legend>

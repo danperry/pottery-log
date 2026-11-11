@@ -1,6 +1,6 @@
 # Pottery Log
 
-A small, mobile-friendly web app for logging pottery pieces: title, photos, clay bodies (one or several), forming method (wheel or hand-built), glazes, firing type and cone, stage (greenware → bisque → glazed → done), dates and notes.
+A small, mobile-friendly web app for logging pottery pieces: title, photos, clay bodies (one or several), forming method (wheel or hand-built), bisque and glaze firing (type and cone for each), stage (greenware → bisque → glazed → done), dates and notes.
 
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework. 
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
@@ -183,7 +183,8 @@ Pottery Log/
   "clays": ["B-Mix", "Porcelain"],
   "formingMethod": "Wheel",
   "glazes": ["Celadon"],
-  "firing": { "type": "Electric", "cone": "6" },
+  "bisqueFiring": { "type": "Electric (oxidation)", "cone": "04" },
+  "glazeFiring": { "type": "Electric (oxidation)", "cone": "6" },
   "dates": { "made": "2026-11-02", "bisqueFired": "2026-11-08", "glazeFired": "2026-11-11", "finished": "" },
   "notes": "Thin rim, two coats.",
   "photos": ["photo-1.jpg", "photo-2.jpg"],
@@ -207,6 +208,8 @@ The first time the app opens after this update, it fills the lists from the glaz
 "settings": { "glazes": ["Celadon", "Shino"], "clays": [{ "name": "B-Mix", "cone": "6" }], … }
 ```
 
+The edit form has a **Bisque** section and a **Glaze** section, each with its own Firing type and Cone. They're saved separately as `"bisqueFiring"` and `"glazeFiring"`. A piece saved before this change had one `"firing"`; it's read as the glaze firing.
+
 Pieces saved by older versions have a single `"clayBody"`; the app reads it as a one-item `"clays"` list and writes `"clays"` the next time the piece is saved.
 
 ### Custom fields and filters
@@ -221,7 +224,7 @@ Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Set
 
 Text fields can **remember values** (on by default): the edit form shows a drop-down of the values you've used, with **+ New…** to type another, just like glazes. Tap the pencil next to a field to rename it, change its type, turn remembering on or off, or edit its list one value per line. Switching a remembered text field to a choice list turns its remembered values into the choices, and switching back does the reverse. Values already saved on pieces are never changed. A renamed field still reads older `piece.json` files that use its previous name.
 
-On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, firing type, cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions (with remembered values) and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
+On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, bisque or glaze firing type and cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions (with remembered values) and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
 
 Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
 

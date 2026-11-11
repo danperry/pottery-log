@@ -13,6 +13,7 @@
   const CONES = ['022', '021', '020', '019', '018', '017', '016', '015', '014', '013', '012', '011', '010',
     '09', '08', '07', '06', '05', '04', '03', '02', '01',
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14'];
+  const FIRING_TYPES = ['Electric (oxidation)', 'Gas (reduction)', 'Gas (oxidation)', 'Raku', 'Wood', 'Soda', 'Salt', 'Pit / smoke', 'Other'];
   const PHOTO_MAX = 1600;
   const THUMB_MAX = 480;
   const LAST_SYNC_KEY = 'potteryLog.lastSync';
@@ -327,6 +328,12 @@
   /** Clay bodies of a piece (older records had one clayBody string). */
   const claysOf = (p) => (Array.isArray(p.clays) ? p.clays : p.clayBody ? [p.clayBody] : []);
 
+  /** Bisque and glaze firing of a piece (older records had one firingType/cone, used for the glaze firing). */
+  const firingsOf = (p) => ({
+    bisqueFiringType: p.bisqueFiringType || '', bisqueCone: p.bisqueCone || '',
+    glazeFiringType: p.glazeFiringType ?? p.firingType ?? '', glazeCone: p.glazeCone ?? p.cone ?? '',
+  });
+
   function clayLabel(name) {
     const c = Settings.clay(name);
     return c && c.cone ? name + ' (cone ' + c.cone + ')' : name;
@@ -434,9 +441,9 @@
   function fieldValues(p, id) {
     if (id === 'glazes') return p.glazes || [];
     if (id === 'method') return p.method ? [METHOD_LABEL[p.method] || p.method] : [];
-    if (id === 'cone') return p.cone ? [coneLabel(p.cone)] : [];
     if (id === 'clayBody') return claysOf(p);
-    if (id === 'firingType') return p[id] ? [p[id]] : [];
+    if (id === 'bisqueCone' || id === 'glazeCone') { const c = firingsOf(p)[id]; return c ? [coneLabel(c)] : []; }
+    if (id === 'bisqueFiringType' || id === 'glazeFiringType') { const t = firingsOf(p)[id]; return t ? [t] : []; }
     const f = Settings.field(id);
     const v = f ? Settings.format(f, (p.custom || {})[id]) : '';
     return v ? [v] : [];
@@ -444,7 +451,7 @@
 
   function sortValues(def, values) {
     const f = def.builtin ? null : def;
-    if (def.id === 'cone') return values.sort((a, b) => CONES.indexOf(a.slice(5)) - CONES.indexOf(b.slice(5)));
+    if (def.id === 'bisqueCone' || def.id === 'glazeCone') return values.sort((a, b) => CONES.indexOf(a.slice(5)) - CONES.indexOf(b.slice(5)));
     if (f && f.type === 'number') return values.sort((a, b) => Number(a) - Number(b));
     if (f && f.type === 'date') return values.sort().reverse();
     if (f && f.type === 'choice') return values.sort((a, b) => (f.options.indexOf(a) + 1 || 999) - (f.options.indexOf(b) + 1 || 999) || a.localeCompare(b));
@@ -486,8 +493,8 @@
         if (want && !fieldValues(p, id).includes(want)) return false;
       }
       if (!query) return true;
-      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '), p.firingType,
-        coneLabel(p.cone), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
+      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '),
+        ...['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone'].flatMap((id) => fieldValues(p, id)), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
       return query.split(/\s+/).every((w) => hay.includes(w));
     }
 
@@ -648,7 +655,9 @@
     if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.map(clayLabel).join(', '));
     add('Forming', METHOD_LABEL[p.method]);
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
-    add('Firing', [p.firingType, coneLabel(p.cone)].filter(Boolean).join(', '));
+    const fire = firingsOf(p);
+    add('Bisque firing', [fire.bisqueFiringType, coneLabel(fire.bisqueCone)].filter(Boolean).join(', '));
+    add('Glaze firing', [fire.glazeFiringType, coneLabel(fire.glazeCone)].filter(Boolean).join(', '));
     add('Made', fmtDate(p.dateMade));
     add('Bisque fired', fmtDate(p.dateBisque));
     add('Glaze fired', fmtDate(p.dateGlazed));
@@ -705,7 +714,7 @@
     const isNew = !existing;
     const piece = existing ? structuredClone(existing) : {
       id: DB.uid(), title: '', photoIds: [], clays: [], method: 'wheel', glazes: [],
-      firingType: '', cone: '', stage: 'greenware', dateMade: today(), dateBisque: '', dateGlazed: '',
+      bisqueFiringType: '', bisqueCone: '', glazeFiringType: '', glazeCone: '', stage: 'greenware', dateMade: today(), dateBisque: '', dateGlazed: '',
       dateDone: '', notes: '', createdAt: Date.now(),
     };
     const originalPhotos = new Set(existing ? existing.photoIds || [] : []);
@@ -725,8 +734,13 @@
     const clayPick = tagPicker($('#clayPicker'), piece.clays, 'clay');
     const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze');
 
-    // Cones.
-    f.cone.append(...CONES.map((c) => el('option', { value: c }, 'Cone ' + c)));
+    // Bisque and glaze firing: the same two drop-downs in each section.
+    Object.assign(piece, firingsOf(piece));
+    delete piece.firingType; delete piece.cone;
+    for (const k of ['bisque', 'glaze']) {
+      f[k + 'FiringType'].append(...FIRING_TYPES.map((t) => el('option', null, t)));
+      f[k + 'Cone'].append(...CONES.map((c) => el('option', { value: c }, 'Cone ' + c)));
+    }
 
     // Stage segmented control.
     $('#stageSeg').replaceChildren(...STAGES.map((s) =>
@@ -735,12 +749,12 @@
     // Fill values.
     f.title.value = piece.title;
     form.querySelectorAll('input[name=method]').forEach((r) => { r.checked = r.value === piece.method; });
-    f.firingType.value = piece.firingType;
-    if (piece.firingType && f.firingType.value !== piece.firingType) {
-      f.firingType.append(el('option', null, piece.firingType));
-      f.firingType.value = piece.firingType;
+    for (const k of ['bisqueFiringType', 'glazeFiringType']) {
+      f[k].value = piece[k];
+      if (piece[k] && f[k].value !== piece[k]) { f[k].append(el('option', null, piece[k])); f[k].value = piece[k]; }
     }
-    f.cone.value = piece.cone;
+    f.bisqueCone.value = piece.bisqueCone;
+    f.glazeCone.value = piece.glazeCone;
     form.querySelectorAll('input[name=stage]').forEach((r) => { r.checked = r.value === piece.stage; });
     ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'].forEach((k) => { f[k].value = piece[k] || ''; });
     f.notes.value = piece.notes;
@@ -831,8 +845,7 @@
       if (!title) { toast('Give the piece a title'); f.title.focus(); return; }
       piece.title = title;
       piece.method = (form.querySelector('input[name=method]:checked') || {}).value || '';
-      piece.firingType = f.firingType.value;
-      piece.cone = f.cone.value;
+      for (const k of ['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone']) piece[k] = f[k].value;
       piece.stage = (form.querySelector('input[name=stage]:checked') || {}).value || 'greenware';
       ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'].forEach((k) => { piece[k] = f[k].value; });
       piece.notes = f.notes.value.trim();

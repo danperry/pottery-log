@@ -379,3 +379,7 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .list-add input { flex: 1; min-width: 0; width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }
 .list-add select, .cf-list select { height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; flex: none; width: 7.5em; }
 .cf-list select { height: 36px; }
+
+/* Bisque and glaze sections of the edit form */
+.form-section { display: grid; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; }
+.form-section > h3 { margin: 0; font-size: 1rem; }

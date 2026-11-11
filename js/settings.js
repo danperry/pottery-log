@@ -27,8 +27,10 @@
     { id: 'clayBody', name: 'Clay body' },
     { id: 'method', name: 'Forming method' },
     { id: 'glazes', name: 'Glaze' },
-    { id: 'firingType', name: 'Firing type' },
-    { id: 'cone', name: 'Cone' },
+    { id: 'bisqueFiringType', name: 'Bisque firing type' },
+    { id: 'bisqueCone', name: 'Bisque cone' },
+    { id: 'glazeFiringType', name: 'Glaze firing type' },
+    { id: 'glazeCone', name: 'Glaze cone' },
   ];
 
   // Fields every log starts with (added once; they can be edited or removed like any other).
@@ -71,7 +73,8 @@
         return out;
       });
     const known = new Set([...BUILTIN_FILTERS.map((b) => b.id), ...fields.map((f) => f.id)]);
-    const filters = (Array.isArray(s.filters) ? s.filters : []).map(String).filter((id) => known.has(id));
+    const renamed = { firingType: 'glazeFiringType', cone: 'glazeCone' }; // before bisque firing was added
+    const filters = (Array.isArray(s.filters) ? s.filters : []).map((id) => renamed[id] || String(id)).filter((id) => known.has(id));
     const seen = new Set();
     const uniqueBy = (name) => { const k = name.toLowerCase(); if (!name || seen.has(k)) return false; seen.add(k); return true; };
     const glazes = (Array.isArray(s.glazes) ? s.glazes : []).map((g) => String(g).trim().slice(0, 120)).filter(uniqueBy);
