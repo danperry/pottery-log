@@ -18,6 +18,7 @@
   const LAST_SYNC_KEY = 'potteryLog.lastSync';
   const FILTER_KEY = 'potteryLog.filter';
   const AUTO_KEY = 'potteryLog.autoBackup';
+  const FIELD_FILTER_KEY = 'potteryLog.fieldFilters'; // chosen values, per device
   const INSTALL_TIP_KEY = 'potteryLog.installTipDismissed';
   const PENDING_AUTO_KEY = 'potteryLog.pendingAutoBackup'; // choice made just before leaving for Google sign-in
 
@@ -299,6 +300,32 @@
     tip.hidden = false;
   }
 
+  /* ---------- field values (built-in and custom), for filters and display ---------- */
+
+  function filterDefs() {
+    return [...Settings.BUILTIN_FILTERS.map((b) => ({ ...b, builtin: true })), ...Settings.fields()];
+  }
+
+  /** The value(s) of a field on a piece, as display strings. */
+  function fieldValues(p, id) {
+    if (id === 'glazes') return p.glazes || [];
+    if (id === 'method') return p.method ? [METHOD_LABEL[p.method] || p.method] : [];
+    if (id === 'cone') return p.cone ? [coneLabel(p.cone)] : [];
+    if (id === 'clayBody' || id === 'firingType') return p[id] ? [p[id]] : [];
+    const f = Settings.field(id);
+    const v = f ? Settings.format(f, (p.custom || {})[id]) : '';
+    return v ? [v] : [];
+  }
+
+  function sortValues(def, values) {
+    const f = def.builtin ? null : def;
+    if (def.id === 'cone') return values.sort((a, b) => CONES.indexOf(a.slice(5)) - CONES.indexOf(b.slice(5)));
+    if (f && f.type === 'number') return values.sort((a, b) => Number(a) - Number(b));
+    if (f && f.type === 'date') return values.sort().reverse();
+    if (f && f.type === 'choice') return values.sort((a, b) => (f.options.indexOf(a) + 1 || 999) - (f.options.indexOf(b) + 1 || 999) || a.localeCompare(b));
+    return values.sort((a, b) => a.localeCompare(b));
+  }
+
   /* ---------- list view ---------- */
 
   async function renderList() {
@@ -308,6 +335,7 @@
     pieces.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
     let filter = store(FILTER_KEY) || 'all';
+    let fieldFilter = store(FIELD_FILTER_KEY) || {}; // { fieldId: value }
     let query = '';
     const chipsEl = $('#stageFilter');
     const listEl = $('#cardList');
@@ -326,9 +354,13 @@
 
     function matches(p) {
       if (filter !== 'all' && p.stage !== filter) return false;
+      for (const id of Settings.filters()) {
+        const want = fieldFilter[id];
+        if (want && !fieldValues(p, id).includes(want)) return false;
+      }
       if (!query) return true;
       const hay = [p.title, p.clayBody, METHOD_LABEL[p.method], (p.glazes || []).join(' '), p.firingType,
-        coneLabel(p.cone), p.notes].join(' ').toLowerCase();
+        coneLabel(p.cone), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
       return query.split(/\s+/).every((w) => hay.includes(w));
     }
 
@@ -354,9 +386,68 @@
       }));
     }
 
+    // One drop-down per chosen field, listing the values your pieces actually have.
+    function drawFieldFilters() {
+      const box = $('#fieldFilters');
+      const defs = filterDefs();
+      const chosen = Settings.filters().map((id) => defs.find((d) => d.id === id)).filter(Boolean);
+      // forget values that no longer exist (e.g. a field was removed)
+      fieldFilter = Object.fromEntries(Object.entries(fieldFilter).filter(([id]) => chosen.some((d) => d.id === id)));
+      const active = Object.values(fieldFilter).filter(Boolean).length;
+      $('#filterBadge').hidden = !chosen.length;
+      $('#filterBadge').textContent = String(chosen.length);
+      box.hidden = !chosen.length;
+      box.replaceChildren(...chosen.map((d) => {
+        const values = sortValues(d, [...new Set(pieces.flatMap((p) => fieldValues(p, d.id)))]);
+        const cur = fieldFilter[d.id] || '';
+        if (cur && !values.includes(cur)) values.unshift(cur);
+        const sel = el('select', { 'aria-label': 'Filter by ' + d.name, class: cur ? 'active' : '' },
+          el('option', { value: '' }, d.name + ': any'),
+          values.map((v) => el('option', { value: v }, d.name + ': ' + v)));
+        sel.value = cur;
+        sel.addEventListener('change', () => {
+          if (sel.value) fieldFilter[d.id] = sel.value; else delete fieldFilter[d.id];
+          store(FIELD_FILTER_KEY, fieldFilter);
+          drawFieldFilters(); drawCards();
+        });
+        return sel;
+      }), active ? el('button', {
+        class: 'clear', type: 'button',
+        onclick: () => { fieldFilter = {}; store(FIELD_FILTER_KEY, null); drawFieldFilters(); drawCards(); },
+      }, 'Clear') : '');
+    }
+
+    // Pop-up for choosing which fields appear as filters.
+    const dialog = $('#filterDialog');
+    $('#filterBtn').addEventListener('click', () => {
+      const chosen = new Set(Settings.filters());
+      const row = (d) => el('label', null,
+        el('input', { type: 'checkbox', value: d.id, checked: chosen.has(d.id) }),
+        el('span', null, d.name),
+        d.builtin ? null : el('span', { class: 'type' }, Settings.TYPES[d.type]));
+      const custom = Settings.fields();
+      $('#filterChoices').replaceChildren(
+        el('h3', null, 'Pottery details'), ...Settings.BUILTIN_FILTERS.map((b) => row({ ...b, builtin: true })),
+        custom.length ? el('h3', null, 'Your fields') : '', ...custom.map(row));
+      $('#filterNoCustom').hidden = custom.length > 0;
+      if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+    });
+    $('#filterNoCustom a').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => {
+      const picked = [...dialog.querySelectorAll('#filterChoices input:checked')].map((i) => i.value);
+      const order = filterDefs().map((d) => d.id);
+      picked.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      if (picked.join() !== Settings.filters().join()) {
+        Settings.update({ filters: picked });
+        markChanged();
+      }
+      drawFieldFilters(); drawCards();
+    });
+
     searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); drawCards(); });
     drawInstallTip();
     drawChips();
+    drawFieldFilters();
     drawCards();
   }
 
@@ -434,6 +525,10 @@
     add('Bisque fired', fmtDate(p.dateBisque));
     add('Glaze fired', fmtDate(p.dateGlazed));
     add('Finished', fmtDate(p.dateDone));
+    for (const f of Settings.fields()) {
+      const v = (p.custom || {})[f.id];
+      add(f.name, f.type === 'date' ? fmtDate(v) : Settings.format(f, v));
+    }
     const factsEl = $('#dFacts');
     if (facts.length) factsEl.replaceChildren(...facts); else factsEl.hidden = true;
 
@@ -521,6 +616,33 @@
     ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'].forEach((k) => { f[k].value = piece[k] || ''; });
     f.notes.value = piece.notes;
 
+    // Custom fields.
+    const custom = { ...(piece.custom || {}) };
+    $('#customFields').replaceChildren(...Settings.fields().map((cf) => {
+      const name = 'cf:' + cf.id;
+      const v = custom[cf.id];
+      if (cf.type === 'yesno') {
+        return el('div', { class: 'field' }, el('span', null, cf.name),
+          el('label', { class: 'yesno' }, el('input', { type: 'checkbox', name, checked: v === true }), el('b', null, 'Yes')));
+      }
+      let input;
+      if (cf.type === 'choice') {
+        const opts = [...cf.options];
+        if (v && !opts.includes(v)) opts.push(v); // keep a value that was removed from the list
+        input = el('select', { name }, el('option', { value: '' }, '—'), opts.map((o) => el('option', { value: o }, o)));
+      } else if (cf.type === 'text') {
+        const listId = 'dl-' + cf.id;
+        input = el('input', { name, maxlength: '200', autocomplete: 'off', list: listId, value: typeof v === 'string' ? v : null });
+        const seen = [...new Set(all.map((p) => (p.custom || {})[cf.id]).filter((x) => typeof x === 'string' && x))].sort();
+        return el('label', { class: 'field' }, el('span', null, cf.name), input,
+          el('datalist', { id: listId }, seen.map((x) => el('option', { value: x }))));
+      } else {
+        input = el('input', { name, type: cf.type === 'number' ? 'number' : 'date', step: cf.type === 'number' ? 'any' : null, inputmode: cf.type === 'number' ? 'decimal' : null });
+      }
+      if (v !== undefined && v !== null) input.value = String(v);
+      return el('label', { class: 'field' }, el('span', null, cf.name), input);
+    }));
+
     // Stage change fills in that stage's date if empty.
     form.querySelectorAll('input[name=stage]').forEach((r) => r.addEventListener('change', () => {
       const s = STAGE_BY_ID[r.value];
@@ -600,6 +722,14 @@
       piece.stage = (form.querySelector('input[name=stage]:checked') || {}).value || 'greenware';
       ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'].forEach((k) => { piece[k] = f[k].value; });
       piece.notes = f.notes.value.trim();
+      for (const cf of Settings.fields()) {
+        const input = form.elements['cf:' + cf.id];
+        if (!input) continue;
+        const v = cf.type === 'yesno' ? input.checked : Settings.coerce(cf, input.value.trim());
+        if (v === '' || (cf.type === 'yesno' && !v && custom[cf.id] === undefined)) delete custom[cf.id];
+        else custom[cf.id] = v;
+      }
+      piece.custom = custom;
       piece.updatedAt = Date.now();
       await DB.putPiece(piece);
       saved = true;
@@ -619,7 +749,7 @@
   /* ---------- backup view ---------- */
 
   async function renderBackup() {
-    setChrome({ title: 'Backup', back: true, fab: false });
+    setChrome({ title: 'Settings', back: true, fab: false });
     mount('tpl-backup');
 
     const pieces = (await DB.allPieces()).filter((p) => !p.deleted);
@@ -680,6 +810,40 @@
       }
       Drive.signIn();
     });
+
+    // Custom fields.
+    function drawCustomFields() {
+      const fields = Settings.fields();
+      $('#cfList').replaceChildren(...fields.map((f) => el('li', null,
+        el('span', { class: 'cf-name' }, f.name),
+        el('span', { class: 'cf-meta' }, Settings.TYPES[f.type] + (f.type === 'choice' ? ': ' + f.options.join(', ') : '')),
+        el('button', {
+          class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + f.name, html: ICON_X,
+          onclick: () => {
+            if (!confirm('Remove the field “' + f.name + '”? It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.')) return;
+            Settings.removeField(f.id);
+            drawCustomFields();
+            markChanged();
+          },
+        }))));
+      $('#cfList').hidden = !fields.length;
+    }
+    $('#cfType').replaceChildren(...Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v }, label)));
+    $('#cfType').addEventListener('change', () => { $('#cfOptionsRow').hidden = $('#cfType').value !== 'choice'; });
+    $('#cfAddForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      try {
+        const f = Settings.addField($('#cfName').value, $('#cfType').value, $('#cfOptions').value.split(','));
+        $('#cfName').value = ''; $('#cfOptions').value = '';
+        drawCustomFields();
+        markChanged();
+        toast('Added “' + f.name + '” to every piece');
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    drawCustomFields();
+    onBackupStateChange = () => { draw(); drawCustomFields(); };
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
@@ -818,6 +982,7 @@
     if (st.pulled) parts.push(st.pulled + (st.pulled === 1 ? ' piece' : ' pieces') + ' updated from Drive');
     if (st.removed) parts.push(st.removed + ' removed');
     if (st.pushed) parts.push(st.pushed + ' saved to Drive');
+    if (st.settings === 'pulled') parts.push('fields and filters updated');
     return parts.join(', ');
   }
 
@@ -855,7 +1020,7 @@
         }
         return null; // wait for the next save, launch or reconnect instead of retrying in a loop
       }
-      if (stats.pulled || stats.removed) {
+      if (stats.pulled || stats.removed || stats.settings === 'pulled') {
         if (!opts.throws) toast(syncSummary(stats), 2500);
         // Show what came from Drive, unless a form is being edited.
         if (!/^#\/(edit|new|backup)/.test(location.hash)) route();

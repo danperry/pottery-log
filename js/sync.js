@@ -55,6 +55,7 @@
         glazeFired: p.dateGlazed || '',
         finished: p.dateDone || '',
       },
+      customFields: Settings.namedValues(p.custom),
     };
   }
 
@@ -88,6 +89,7 @@
       dateBisque: str(d.bisqueFired),
       dateGlazed: str(d.glazeFired),
       dateDone: str(d.finished),
+      custom: Settings.fromNamed(j.customFields),
       createdAt: ms(j.createdAt) || undefined,
       updatedAt: ms(j.savedAt),
     };
@@ -299,6 +301,16 @@
     if (indexFile) index = await readJson(indexFile.id).catch(() => null);
     const legacy = indexFile ? null : await importLegacy(rootId, onProgress);
 
+    // Custom fields and filter choices: the newest save wins. Apply them first, so pieces
+    // read below map their custom values onto the right fields.
+    let settingsChange = '';
+    const rs = index && index.settings;
+    const rsAt = rs ? ms(rs.savedAt) : 0;
+    const local = Settings.get();
+    if (rs && rsAt > local.updatedAt) { Settings.applyRemote(rs, rootId); settingsChange = 'pulled'; }
+    else if (Settings.isDirty(rootId)) settingsChange = 'pushed';
+    else if (rs && rsAt === local.updatedAt) Settings.markSynced(rootId, rsAt);
+
     // What Drive has: index entries, overridden by any newer piece.json (the index can lag behind).
     const remote = new Map();
     for (const e of (index && Array.isArray(index.items)) ? index.items : []) {
@@ -387,7 +399,9 @@
     const all = (await DB.allPieces()).filter((p) => p.sync && p.sync.root === rootId && (p.deleted || p.sync.folderId));
     all.sort((a, b) => (a.deleted - b.deleted) || (a.title || '').localeCompare(b.title || ''));
     const items = all.map(indexEntry);
-    const same = index && JSON.stringify(index.items) === JSON.stringify(items);
+    const settings = Settings.forDrive();
+    const same = index && JSON.stringify(index.items) === JSON.stringify(items) &&
+      JSON.stringify(index.settings || null) === JSON.stringify(settings.savedAt ? settings : null);
     if (!same) {
       onProgress('Updating the index…');
       const doc = {
@@ -395,12 +409,15 @@
         format: FORMAT,
         about: 'Index of all pieces. Each piece has its own folder with piece.json and its photos.',
         updatedAt: iso(Date.now()),
+        ...(settings.savedAt ? { settings } : {}),
         items,
       };
       const meta = { appProperties: { potteryLog: 'index' } };
       if (indexFile) await Drive.update(indexFile.id, meta, jsonBlob(doc));
       else await Drive.create({ ...meta, name: INDEX_NAME, parents: [rootId], mimeType: 'application/json' }, jsonBlob(doc));
     }
+    if (settings.savedAt) Settings.markSynced(rootId, ms(settings.savedAt)); // edits made during the sync stay pending
+    stats.settings = settingsChange;
 
     if (legacy && !failed.length) { // the old single-file backup now lives in the new layout
       await Drive.trash(legacy.dataFileId).catch(() => {});
@@ -462,7 +479,7 @@
     async fetchPhoto(photoId, fileId) { if (!(await DB.getPhoto(photoId))) await savePhoto(photoId, fileId); },
     async pendingCount(rootId) {
       if (!rootId) return 0;
-      return (await DB.allPieces()).filter((p) => isDirty(p, rootId)).length;
+      return (await DB.allPieces()).filter((p) => isDirty(p, rootId)).length + (Settings.isDirty(rootId) ? 1 : 0);
     },
     // exposed for tests
     _toPieceJson: toPieceJson,

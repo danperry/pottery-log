@@ -16,6 +16,7 @@ css/styles.css           Styles (light and dark)
 js/config.js             Worker URL, Google client ID and API key go here
 js/db.js                 IndexedDB storage (pieces, photos, encrypted sign-in)
 js/drive.js              Google sign-in (via the Worker) and Drive API calls
+js/settings.js           Custom fields and filter choices (synced in the index)
 js/sync.js               Two-way sync with the Drive folder (one folder per piece)
 js/app.js                Views, routing, photo handling, sync triggers
 sw.js                    Service worker (offline app shell)
@@ -192,6 +193,18 @@ Pottery Log/
 ```
 
 Renaming a piece renames its folder. Deleting a piece moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
+
+### Custom fields and filters
+
+Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the cloud icon). They appear on every piece's edit form and details, and in `piece.json` by name:
+
+```json
+"customFields": { "Kiln": "Big kiln", "Weight (g)": 340, "Gift": true }
+```
+
+On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, firing type, cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
+
+Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
 
 ### Conflicts: the latest save wins
 
