@@ -18,6 +18,7 @@
   const LAST_SYNC_KEY = 'potteryLog.lastSync';
   const FILTER_KEY = 'potteryLog.filter';
   const AUTO_KEY = 'potteryLog.autoBackup';
+  const INSTALL_TIP_KEY = 'potteryLog.installTipDismissed';
   const PENDING_AUTO_KEY = 'potteryLog.pendingAutoBackup'; // choice made just before leaving for Google sign-in
 
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -227,6 +228,77 @@
     app.replaceChildren($('#' + tplId).content.cloneNode(true));
   }
 
+  /* ---------- "add to home screen" tip ---------- */
+
+  const ICON_SHARE = '<svg class="tip-glyph" viewBox="0 0 24 24" aria-label="Share"><path d="M12 15V3M8 7l4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+  const ICON_MENU = '<svg class="tip-glyph" viewBox="0 0 24 24" aria-label="menu"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3"/></svg>';
+  let installPrompt = null; // Chrome/Android's own install dialog, when it offers one
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); // show our tip instead of Chrome's mini bar
+    installPrompt = e;
+    if (location.hash.replace(/^#\/?/, '') === '') drawInstallTip();
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    const tip = $('#installTip'); if (tip) tip.hidden = true;
+  });
+
+  function isInstalled() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
+  }
+
+  function phoneKind() {
+    const ua = navigator.userAgent;
+    // iPadOS reports itself as a Mac, so also check for touch.
+    if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+    if (/Android/.test(ua)) return 'android';
+    return null;
+  }
+
+  /** How to add the app on this phone, or null when it's already installed or not a phone. */
+  function installHowTo() {
+    if (isInstalled()) return null;
+    const kind = phoneKind();
+    if (!kind) return null;
+    if (kind === 'ios') {
+      return 'Tap ' + ICON_SHARE + ' <strong>Share</strong> in the browser toolbar, then <strong>Add to Home Screen</strong>.' +
+        (/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent) ? '' : ' (In Safari, Share is at the bottom of the screen, or behind ••• on newer iPhones.)');
+    }
+    if (installPrompt) return 'It opens full screen, works offline, and your phone is less likely to clear its storage.';
+    return 'Tap ' + ICON_MENU + ' the browser menu, then <strong>Add to Home screen</strong> or <strong>Install app</strong>.';
+  }
+
+  function drawInstallTip() {
+    const tip = $('#installTip');
+    if (!tip) return;
+    const how = store(INSTALL_TIP_KEY) ? null : installHowTo();
+    if (!how) { tip.hidden = true; return; }
+    const body = el('div', { class: 'tip-body' },
+      el('strong', { class: 'tip-title' }, 'Add Pottery Log to your home screen'),
+      el('p', { html: how }));
+    if (installPrompt) {
+      body.append(el('button', {
+        class: 'btn btn-primary btn-small', type: 'button',
+        onclick: async () => {
+          const p = installPrompt; installPrompt = null;
+          p.prompt();
+          const { outcome } = await p.userChoice.catch(() => ({}));
+          if (outcome === 'accepted') tip.hidden = true; else drawInstallTip();
+        },
+      }, 'Install app'));
+    }
+    tip.replaceChildren(
+      el('img', { src: 'icons/icon-192.png', alt: '' }),
+      body,
+      el('button', {
+        class: 'icon-btn', type: 'button', 'aria-label': 'Dismiss tip', html: ICON_X,
+        onclick: () => { store(INSTALL_TIP_KEY, Date.now()); tip.hidden = true; },
+      }));
+    tip.hidden = false;
+  }
+
   /* ---------- list view ---------- */
 
   async function renderList() {
@@ -283,6 +355,7 @@
     }
 
     searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); drawCards(); });
+    drawInstallTip();
     drawChips();
     drawCards();
   }
@@ -558,9 +631,11 @@
       (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used' : '') +
       (stubs ? '. ' + stubs + ' synced ' + (stubs === 1 ? 'piece loads its' : 'pieces load their') + ' notes and photos when opened.' : '');
     const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
-    $('#persistLabel').textContent = persisted
-      ? 'Storage is marked persistent, so the browser won\'t clear it on its own.'
-      : 'Tip: add the app to your home screen so the browser is less likely to clear its storage.';
+    const how = installHowTo();
+    if (persisted) $('#persistLabel').textContent = 'Storage is marked persistent, so the browser won\'t clear it on its own.';
+    else if (how) $('#persistLabel').innerHTML = 'Add the app to your home screen so the browser is less likely to clear its storage. ' + how;
+    else if (!isInstalled()) $('#persistLabel').textContent = 'Tip: install the app (or add it to your home screen) so the browser is less likely to clear its storage.';
+    else $('#persistLabel').hidden = true;
 
     function draw() {
       $('#driveUnconfigured').hidden = Drive.configured;
