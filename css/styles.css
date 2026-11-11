@@ -373,9 +373,7 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .pick-row { display: flex; gap: 8px; }
 .pick-row > * { min-width: 0; }
 .pick-row select, .pick-row input { flex: 1; }
-.tag-picker .pick-row select.cone { flex: 0 0 auto; width: auto; max-width: 42%; }
 .pick-row .btn { flex: none; }
-.tag .cone-note { opacity: .7; font-size: .85em; margin-left: 2px; }
 .list-head { margin: 18px 0 4px; font-size: .95rem; }
 .list-add { display: flex; gap: 8px; }
 .list-add input { flex: 1; min-width: 0; width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }

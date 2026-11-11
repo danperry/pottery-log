@@ -8,7 +8,7 @@
  *                                                  aliases: earlier names, so old piece.json still reads
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
- *     clays: [{ name: 'B-Mix', cone: '6' }, …],   remembered clay bodies, each with its cone
+ *     clays: [{ name: 'B-Mix' }, …],              remembered clay bodies (cones are on the bisque and glaze firing)
  *     defaultsAdded: true,                        the starter fields were offered once
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
@@ -81,7 +81,7 @@
     seen.clear();
     const clays = (Array.isArray(s.clays) ? s.clays : [])
       .map((c) => (typeof c === 'string' ? { name: c } : c || {}))
-      .map((c) => ({ name: String(c.name || '').trim().slice(0, 120), cone: String(c.cone || '') }))
+      .map((c) => ({ name: String(c.name || '').trim().slice(0, 120) })) // older lists had a cone per clay: dropped
       .filter((c) => uniqueBy(c.name));
     return { fields, filters: [...new Set(filters)], glazes, clays, defaultsAdded: !!s.defaultsAdded, updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
@@ -254,7 +254,7 @@
       const hasG = new Set(g.map((x) => x.toLowerCase())); const hasC = new Set(c.map((x) => x.name.toLowerCase()));
       for (const name of glazes) if (name && !hasG.has(name.toLowerCase())) { g.push(name); hasG.add(name.toLowerCase()); }
       for (const x of clays) {
-        const item = typeof x === 'string' ? { name: x, cone: '' } : x;
+        const item = { name: typeof x === 'string' ? x : x.name };
         if (item.name && !hasC.has(item.name.toLowerCase())) { c.push(item); hasC.add(item.name.toLowerCase()); }
       }
       if (g.length === s.glazes.length && c.length === s.clays.length) return false;

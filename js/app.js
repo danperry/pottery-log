@@ -334,16 +334,6 @@
     glazeFiringType: p.glazeFiringType ?? p.firingType ?? '', glazeCone: p.glazeCone ?? p.cone ?? '',
   });
 
-  function clayLabel(name) {
-    const c = Settings.clay(name);
-    return c && c.cone ? name + ' (cone ' + c.cone + ')' : name;
-  }
-
-  function coneOptions(selected, emptyLabel) {
-    return [el('option', { value: '' }, emptyLabel || 'Cone —'),
-      ...CONES.map((c) => el('option', { value: c, selected: c === selected }, 'Cone ' + c))];
-  }
-
   /**
    * A remembered text field: a drop-down of its remembered values with "+ New…" to type one.
    * The form control is named `name` whichever of the two is showing.
@@ -379,37 +369,32 @@
 
   /**
    * Chosen values as tags, plus a drop-down of remembered ones and a "New…" option to type
-   * one. kind is 'glaze' or 'clay' (new clays also get a cone).
-   * Returns { flush() } to add anything typed but not yet added, and newCones for new clays.
+   * one. kind is 'glaze' or 'clay'.
+   * Returns { flush() } to add anything typed but not yet added.
    */
   function tagPicker(box, values, kind) {
     const noun = kind === 'clay' ? 'clay body' : 'glaze';
     const known = () => (kind === 'clay' ? Settings.clays().map((c) => c.name) : Settings.glazes());
-    const newCones = {};
     const tags = el('div', { class: 'tags' });
     const row = el('div', { class: 'pick-row' });
     let typing = false;
     const has = (v) => values.some((x) => x.toLowerCase() === v.toLowerCase());
-    function add(v, cone) {
+    function add(v) {
       v = String(v || '').trim().slice(0, 120);
       if (!v || has(v)) return;
       values.push(v);
-      if (kind === 'clay' && cone !== undefined && !Settings.clay(v)) newCones[v] = cone;
     }
     function drawTags() {
       tags.replaceChildren(...values.map((v, i) => el('span', { class: 'tag' }, v,
-        kind === 'clay' && (Settings.clay(v) || {}).cone ? el('span', { class: 'cone-note' }, 'cone ' + Settings.clay(v).cone)
-          : kind === 'clay' && newCones[v] ? el('span', { class: 'cone-note' }, 'cone ' + newCones[v]) : null,
         el('button', { type: 'button', 'aria-label': 'Remove ' + v, html: ICON_X, onclick: () => { values.splice(i, 1); draw(); } }))));
     }
     function drawRow() {
       if (typing) {
         const input = el('input', { maxlength: '120', autocomplete: 'off', placeholder: 'New ' + noun + ' name', 'aria-label': 'New ' + noun + ' name' });
-        const cone = kind === 'clay' ? el('select', { class: 'cone', 'aria-label': 'Cone for this clay' }, coneOptions('', 'Cone')) : null;
-        const commit = () => { add(input.value, cone ? cone.value : undefined); typing = false; draw(); };
+        const commit = () => { add(input.value); typing = false; draw(); };
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') { typing = false; draw(); } });
-        row.replaceChildren(...[input, cone].filter(Boolean), el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: commit }, 'Add'));
-        row.flush = () => { if (input.value.trim()) add(input.value, cone ? cone.value : undefined); };
+        row.replaceChildren(input, el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: commit }, 'Add'));
+        row.flush = () => { if (input.value.trim()) add(input.value); };
         input.focus();
         return;
       }
@@ -417,7 +402,7 @@
       const options = known().filter((v) => !has(v)).sort((a, b) => a.localeCompare(b));
       const sel = el('select', { 'aria-label': 'Add a ' + noun },
         el('option', { value: '' }, values.length ? 'Add another ' + noun + '…' : 'Choose a ' + noun + '…'),
-        options.map((v) => el('option', { value: v }, kind === 'clay' ? clayLabel(v) : v)),
+        options.map((v) => el('option', { value: v }, v)),
         el('option', { value: '__new' }, '+ New ' + noun + '…'));
       sel.addEventListener('change', () => {
         if (sel.value === '__new') typing = true; else if (sel.value) add(sel.value);
@@ -428,7 +413,7 @@
     function draw() { drawTags(); drawRow(); }
     box.replaceChildren(tags, row);
     draw();
-    return { flush: () => row.flush(), newCones };
+    return { flush: () => row.flush() };
   }
 
   /* ---------- field values (built-in and custom), for filters and display ---------- */
@@ -652,7 +637,7 @@
     const facts = [];
     const add = (k, v) => { if (v) facts.push(el('dt', null, k), el('dd', null, v)); };
     const clays = claysOf(p);
-    if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.map(clayLabel).join(', '));
+    if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.join(', '));
     add('Forming', METHOD_LABEL[p.method]);
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
     const fire = firingsOf(p);
@@ -862,7 +847,7 @@
       piece.custom = custom;
       // Remember new glazes and clays for the drop-downs (synced with the other settings).
       const isNew = (v) => !hadNames.has(v.toLowerCase());
-      Settings.learn({ glazes: piece.glazes.filter(isNew), clays: piece.clays.filter(isNew).map((name) => ({ name, cone: clayPick.newCones[name] || '' })) });
+      Settings.learn({ glazes: piece.glazes.filter(isNew), clays: piece.clays.filter(isNew) });
       piece.updatedAt = Date.now();
       await DB.putPiece(piece);
       saved = true;
@@ -1028,12 +1013,7 @@
     function drawLists() {
       const clays = Settings.clays();
       $('#clayListEdit').replaceChildren(...clays.map((c, i) => {
-        const cone = el('select', { 'aria-label': 'Cone for ' + c.name }, coneOptions(c.cone));
-        cone.addEventListener('change', () => {
-          Settings.setClays(clays.map((x, j) => (j === i ? { ...x, cone: cone.value } : x)));
-          markChanged();
-        });
-        return el('li', null, el('span', { class: 'cf-name' }, c.name), el('span', { class: 'cf-meta' }), cone,
+        return el('li', null, el('span', { class: 'cf-name' }, c.name), el('span', { class: 'cf-meta' }),
           el('button', {
             class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + c.name, html: ICON_X,
             onclick: () => { Settings.setClays(clays.filter((_, j) => j !== i)); drawLists(); markChanged(); },
@@ -1049,14 +1029,13 @@
       $('#clayListEdit').hidden = !clays.length;
       $('#glazeListEdit').hidden = !glazes.length;
     }
-    $('#clayAddCone').replaceChildren(...coneOptions('', 'Cone'));
     $('#clayAddForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const name = $('#clayAddName').value.trim();
       if (!name) return;
       if (Settings.clay(name)) { toast('“' + name + '” is already in the list'); return; }
-      Settings.setClays([...Settings.clays(), { name, cone: $('#clayAddCone').value }]);
-      $('#clayAddName').value = ''; $('#clayAddCone').value = '';
+      Settings.setClays([...Settings.clays(), { name }]);
+      $('#clayAddName').value = '';
       drawLists(); markChanged();
     });
     $('#glazeAddForm').addEventListener('submit', (e) => {
