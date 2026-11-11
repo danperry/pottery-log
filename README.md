@@ -211,13 +211,17 @@ Pieces saved by older versions have a single `"clayBody"`; the app reads it as a
 
 ### Custom fields and filters
 
+Every log starts with three custom fields: **Line** (text), **Price** (number) and **Purpose** (text, starting with Keep, Give and Sell). They're added once, so if you remove one it stays removed on all your devices.
+
 Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
-"customFields": { "Kiln": "Big kiln", "Weight (g)": 340, "Gift": true }
+"customFields": { "Line": "Speckled", "Price": 45, "Purpose": "Give" }
 ```
 
-On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, firing type, cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
+Text fields can **remember values** (on by default): the edit form shows a drop-down of the values you've used, with **+ New…** to type another, just like glazes. Tap the pencil next to a field to rename it, change its type, turn remembering on or off, or edit its list one value per line. Switching a remembered text field to a choice list turns its remembered values into the choices, and switching back does the reverse. Values already saved on pieces are never changed. A renamed field still reads older `piece.json` files that use its previous name.
+
+On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, firing type, cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions (with remembered values) and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
 
 Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
 

@@ -29,6 +29,7 @@
   const backupNavBtn = $('#backupNavBtn');
 
   const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
   const ICON_POT = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M22 10h20M24 10c0 6-10 10-10 24 0 12 8 20 18 20s18-8 18-20c0-14-10-18-10-24"/></svg>';
 
   /* ---------- small helpers ---------- */
@@ -337,6 +338,39 @@
   }
 
   /**
+   * A remembered text field: a drop-down of its remembered values with "+ New…" to type one.
+   * The form control is named `name` whichever of the two is showing.
+   */
+  function valuePicker(cf, current, name) {
+    const row = el('div', { class: 'pick-row' });
+    let typing = !cf.values.length && !current;
+    function draw() {
+      if (typing) {
+        const input = el('input', { name, maxlength: '200', autocomplete: 'off', placeholder: 'New ' + cf.name.toLowerCase(), 'aria-label': cf.name, value: current || null });
+        input.addEventListener('input', () => { current = input.value; });
+        const parts = [input];
+        if (cf.values.length) {
+          parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => { typing = false; current = cf.values.includes(current) ? current : ''; draw(); } }, 'List'));
+        }
+        row.replaceChildren(...parts);
+        return;
+      }
+      const opts = [...cf.values];
+      if (current && !opts.includes(current)) opts.push(current); // keep a value taken off the list
+      const sel = el('select', { name, 'aria-label': cf.name },
+        el('option', { value: '' }, '—'),
+        opts.map((o) => el('option', { value: o, selected: o === current }, o)),
+        el('option', { value: '__new' }, '+ New ' + cf.name.toLowerCase() + '…'));
+      sel.addEventListener('change', () => {
+        if (sel.value === '__new') { typing = true; current = ''; draw(); row.querySelector('input').focus(); } else current = sel.value;
+      });
+      row.replaceChildren(sel);
+    }
+    draw();
+    return el('div', { class: 'field' }, el('span', null, cf.name), row);
+  }
+
+  /**
    * Chosen values as tags, plus a drop-down of remembered ones and a "New…" option to type
    * one. kind is 'glaze' or 'clay' (new clays also get a cone).
    * Returns { flush() } to add anything typed but not yet added, and newCones for new clays.
@@ -422,7 +456,9 @@
   async function renderList() {
     setChrome({ title: 'Pottery Log', back: false, fab: true });
     mount('tpl-list');
+    const view = app.firstElementChild;
     const pieces = (await DB.allPieces()).filter((p) => !p.deleted);
+    if (!view.isConnected) return; // moved on while reading
     pieces.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
     let filter = store(FILTER_KEY) || 'all';
@@ -723,6 +759,8 @@
         const opts = [...cf.options];
         if (v && !opts.includes(v)) opts.push(v); // keep a value that was removed from the list
         input = el('select', { name }, el('option', { value: '' }, '—'), opts.map((o) => el('option', { value: o }, o)));
+      } else if (cf.type === 'text' && cf.remember) {
+        return valuePicker(cf, typeof v === 'string' ? v : '', name);
       } else if (cf.type === 'text') {
         const listId = 'dl-' + cf.id;
         input = el('input', { name, maxlength: '200', autocomplete: 'off', list: listId, value: typeof v === 'string' ? v : null });
@@ -805,6 +843,9 @@
         if (v === '' || (cf.type === 'yesno' && !v && custom[cf.id] === undefined)) delete custom[cf.id];
         else custom[cf.id] = v;
       }
+      // Remember values newly typed into remembered text fields (one taken off a list stays off).
+      const before = piece.custom || {};
+      Settings.learnValues(Object.fromEntries(Object.entries(custom).filter(([id, v]) => v !== before[id])));
       piece.custom = custom;
       // Remember new glazes and clays for the drop-downs (synced with the other settings).
       const isNew = (v) => !hadNames.has(v.toLowerCase());
@@ -886,28 +927,80 @@
     $('#signInBtn').addEventListener('click', () => Drive.signIn());
 
     // Custom fields.
+    const fieldMeta = (f) => Settings.TYPES[f.type] +
+      (f.type === 'choice' ? ': ' + f.options.join(', ')
+        : f.type === 'text' && f.remember ? ', remembered' + (f.values.length ? ': ' + f.values.join(', ') : '') : '');
     function drawCustomFields() {
       const fields = Settings.fields();
-      $('#cfList').replaceChildren(...fields.map((f) => el('li', null,
-        el('span', { class: 'cf-name' }, f.name),
-        el('span', { class: 'cf-meta' }, Settings.TYPES[f.type] + (f.type === 'choice' ? ': ' + f.options.join(', ') : '')),
-        el('button', {
-          class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + f.name, html: ICON_X,
-          onclick: () => {
-            if (!confirm('Remove the field “' + f.name + '”? It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.')) return;
-            Settings.removeField(f.id);
-            drawCustomFields();
-            markChanged();
-          },
-        }))));
+      $('#cfList').replaceChildren(...fields.map((f) => {
+        const li = el('li', null,
+          el('span', { class: 'cf-name' }, f.name),
+          el('span', { class: 'cf-meta' }, fieldMeta(f)),
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + f.name, html: ICON_EDIT, onclick: () => editField(li, f) }),
+          el('button', {
+            class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + f.name, html: ICON_X,
+            onclick: () => {
+              if (!confirm('Remove the field “' + f.name + '”? It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.')) return;
+              Settings.removeField(f.id);
+              drawCustomFields();
+              markChanged();
+            },
+          }));
+        return li;
+      }));
       $('#cfList').hidden = !fields.length;
     }
+    // Edit a field in place: name, type, "remember values", and its list (choices or remembered values).
+    function editField(li, f) {
+      const name = el('input', { maxlength: '60', value: f.name, autocomplete: 'off' });
+      const type = el('select', null, Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
+      const remember = el('input', { type: 'checkbox', checked: f.type !== 'text' || f.remember !== false });
+      const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember values for a drop-down'));
+      const list = el('textarea', { rows: '4' });
+      list.value = (f.type === 'choice' ? f.options : f.values || []).join('\n');
+      const listLabel = el('span');
+      const listRow = el('label', { class: 'field' }, listLabel, list);
+      function sync() {
+        const t = type.value;
+        if (t === 'text' && type.dataset.was === 'choice') remember.checked = true; // choices become remembered values
+        type.dataset.was = t;
+        rememberRow.hidden = t !== 'text';
+        listRow.hidden = !(t === 'choice' || (t === 'text' && remember.checked));
+        listLabel.textContent = t === 'choice' ? 'Choices, one per line' : 'Remembered values, one per line';
+      }
+      type.dataset.was = f.type;
+      type.addEventListener('change', sync); remember.addEventListener('change', sync);
+      sync();
+      const save = (e) => {
+        e.preventDefault();
+        try {
+          Settings.editField(f.id, { name: name.value, type: type.value, remember: remember.checked, list: list.value.split('\n') });
+          drawCustomFields(); markChanged();
+          toast('Saved “' + name.value.trim() + '”');
+        } catch (err) { toast(err.message); }
+      };
+      const form = el('form', { class: 'cf-edit' },
+        el('div', { class: 'field-row' },
+          el('label', { class: 'field' }, el('span', null, 'Field name'), name),
+          el('label', { class: 'field' }, el('span', null, 'Type'), type)),
+        el('div', { class: 'field' }, rememberRow), listRow,
+        el('div', { class: 'cf-edit-actions' },
+          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawCustomFields }, 'Cancel')));
+      form.addEventListener('submit', save);
+      li.classList.add('editing');
+      li.replaceChildren(form);
+      name.focus();
+    }
     $('#cfType').replaceChildren(...Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v }, label)));
-    $('#cfType').addEventListener('change', () => { $('#cfOptionsRow').hidden = $('#cfType').value !== 'choice'; });
+    const syncAddForm = () => { $('#cfOptionsRow').hidden = $('#cfType').value !== 'choice'; $('#cfRememberRow').hidden = $('#cfType').value !== 'text'; };
+    $('#cfType').addEventListener('change', syncAddForm);
+    syncAddForm();
     $('#cfAddForm').addEventListener('submit', (e) => {
       e.preventDefault();
       try {
-        const f = Settings.addField($('#cfName').value, $('#cfType').value, $('#cfOptions').value.split(','));
+        const type = $('#cfType').value;
+        const f = Settings.addField($('#cfName').value, type, type === 'choice' ? $('#cfOptions').value.split(',') : [], $('#cfRemember').checked);
         $('#cfName').value = ''; $('#cfOptions').value = '';
         drawCustomFields();
         markChanged();
@@ -962,7 +1055,7 @@
       drawLists(); markChanged();
     });
     drawLists();
-    onBackupStateChange = () => { draw(); drawCustomFields(); drawLists(); };
+    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); drawLists(); }; // keep an open field editor
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
@@ -1166,14 +1259,23 @@
     return seedNames;
   }
   async function seedLists(afterSync) {
-    if (store('potteryLog.listsSeeded')) return false;
-    const names = await noteSeedNames();
-    if (!afterSync) return Settings.learn(names, { quiet: true });
-    store('potteryLog.listsSeeded', Date.now());
-    store('potteryLog.listsSeed', null);
-    if (Settings.learn(names)) return true;
-    const s = Settings.get(); // seeded quietly and Drive had nothing newer: upload them
-    if (!s.updatedAt && (s.glazes.length || s.clays.length)) { Settings.update({}); return true; }
+    // Starter fields, and "remember values" for text fields made before that option existed.
+    const ps = (await DB.allPieces()).filter((p) => !p.deleted);
+    const valuesFor = (id) => ps.map((p) => (p.custom || {})[id]).filter((v) => typeof v === 'string' && v);
+    // Before the first sync it's quiet (Drive's copy still wins), unless settings were already
+    // edited here, when it's a normal change. When connected, it waits for the sync.
+    let changed = afterSync ? Settings.setUp(valuesFor)
+      : connected() ? false : Settings.setUp(valuesFor, { quiet: !Settings.get().updatedAt });
+    if (!store('potteryLog.listsSeeded')) {
+      const names = await noteSeedNames();
+      if (!afterSync) return Settings.learn(names, { quiet: true }) || changed;
+      store('potteryLog.listsSeeded', Date.now());
+      store('potteryLog.listsSeed', null);
+      changed = Settings.learn(names) || changed;
+    }
+    if (!afterSync || changed) return changed;
+    const s = Settings.get(); // set up quietly and Drive had nothing newer: upload it
+    if (!s.updatedAt && (s.glazes.length || s.clays.length || s.fields.length)) { Settings.update({}); return true; }
     return false;
   }
 

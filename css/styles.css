@@ -340,13 +340,19 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .check-list h3 { margin: 10px 4px 2px; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 
 /* Custom fields: settings list and edit form */
-.cf-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; }
+.cf-list { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .cf-list li { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 12px; border: 1px solid var(--border); border-radius: 12px; }
 .cf-list .cf-name { font-weight: 600; }
 .cf-list .cf-meta { color: var(--muted); font-size: .88rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cf-list .icon-btn { flex: none; width: 38px; height: 38px; color: var(--muted); }
 .cf-list .icon-btn svg { width: 18px; height: 18px; }
 .cf-add { display: grid; gap: 12px; }
+.cf-list li.editing { display: block; padding: 12px; }
+.cf-edit { display: grid; gap: 12px; }
+.cf-edit textarea { min-height: 96px; }
+.cf-edit-actions { display: flex; gap: 8px; }
+.cf-add .yesno, .cf-edit .yesno { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.cf-add .yesno b, .cf-edit .yesno b { font-weight: 500; }
 .cf-add .btn { justify-self: start; }
 .custom-fields { display: grid; gap: 18px; }
 .custom-fields:empty { display: none; }
@@ -362,11 +368,11 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 /* Glaze and clay pickers (edit form) and list editors (settings) */
 .tag-picker { display: grid; gap: 8px; }
 .tag-picker .tags:empty { display: none; }
-.tag-picker .pick-row { display: flex; gap: 8px; }
-.tag-picker .pick-row > * { min-width: 0; }
-.tag-picker .pick-row select, .tag-picker .pick-row input { flex: 1; }
+.pick-row { display: flex; gap: 8px; }
+.pick-row > * { min-width: 0; }
+.pick-row select, .pick-row input { flex: 1; }
 .tag-picker .pick-row select.cone { flex: 0 0 auto; width: auto; max-width: 42%; }
-.tag-picker .pick-row .btn { flex: none; }
+.pick-row .btn { flex: none; }
 .tag .cone-note { opacity: .7; font-size: .85em; margin-left: 2px; }
 .list-head { margin: 18px 0 4px; font-size: .95rem; }
 .list-add { display: flex; gap: 8px; }
