@@ -16,6 +16,7 @@
   const FIRING_TYPES = ['Electric (oxidation)', 'Gas (reduction)', 'Gas (oxidation)', 'Raku', 'Wood', 'Soda', 'Salt', 'Pit / smoke', 'Other'];
   const PHOTO_MAX = 1600;
   const THUMB_MAX = 480;
+  const PIECE_THUMB_MAX = 320; // each piece's small list thumbnail
   const LAST_SYNC_KEY = 'potteryLog.lastSync';
   const FILTER_KEY = 'potteryLog.filter';
   const CONNECT_TIP_KEY = 'potteryLog.connectTipDismissed';
@@ -62,6 +63,7 @@
   function fmtBytes(n) {
     if (!n && n !== 0) return '';
     if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1).replace(/\.0$/, '') + ' GB';
     return (n / 1024 / 1024).toFixed(1) + ' MB';
   }
 
@@ -127,7 +129,7 @@
       photoFetches.set(pid, (async () => {
         if (photoSlots === 0) await new Promise((res) => photoWaiters.push(res));
         photoSlots--;
-        try { await Sync.fetchPhoto(pid, fileId); } catch (e) { /* stays a placeholder */ } finally {
+        try { await Sync.fetchPhoto(pid, fileId); PhotoCache.check(); } catch (e) { /* stays a placeholder */ } finally {
           photoSlots++;
           const next = photoWaiters.shift(); if (next) next();
           photoFetches.delete(pid);
@@ -143,6 +145,32 @@
     if (u) return u;
     await fetchPhotoOnce(piece, pid);
     return photoUrl(pid, which);
+  }
+
+  /**
+   * The piece's small list thumbnail, made from its thumbnail photo (picked in Edit, or else
+   * the newest). opts.download false: don't download the photo just for this.
+   */
+  async function pieceThumbUrl(p, opts = {}) {
+    const pid = PhotoCache.coverOf(p);
+    if (!pid) return null;
+    const t = await DB.getPieceThumb(p.id);
+    if (t && t.photoId === pid && t.thumb) return blobUrl(t.thumb);
+    let photo = await DB.getPhoto(pid);
+    if (!photo && opts.download !== false) { await fetchPhotoOnce(p, pid); photo = await DB.getPhoto(pid); }
+    if (!photo) return null;
+    const src = photo.thumb || photo.blob;
+    try {
+      const img = await decodeImage(src);
+      const small = await scaleTo(img, PIECE_THUMB_MAX, 0.75);
+      if (img.close) img.close();
+      await DB.putPieceThumb(p.id, pid, small);
+      PhotoCache.thumbRestored(p.id);
+      PhotoCache.check();
+      return blobUrl(small);
+    } catch (e) {
+      return blobUrl(src);
+    }
   }
 
   /* ---------- image processing ---------- */
@@ -200,6 +228,7 @@
 
   function route() {
     revokeUrls();
+    PhotoCache.leave();
     if (typeof updateBadge === 'function') updateBadge();
     const h = location.hash.replace(/^#\/?/, '');
     const [view, id] = h.split('/');
@@ -493,8 +522,10 @@
         : shown.length + ' of ' + pieces.length + ' pieces';
       listEl.replaceChildren(...shown.map((p) => {
         const thumb = el('div', { class: 'thumb', html: ICON_POT });
-        if (p.photoIds && p.photoIds[0]) {
-          piecePhotoUrl(p, p.photoIds[0]).then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
+        if (p.photoIds && p.photoIds.length) {
+          // A thumbnail removed in a storage emergency comes back when the piece is opened.
+          pieceThumbUrl(p, { download: !PhotoCache.thumbDropped(p.id) })
+            .then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
         }
         const sub = [claysOf(p).join(', '), (p.glazes || []).join(', ')].filter(Boolean).join(' · ') || METHOD_LABEL[p.method] || '';
         return el('li', null, el('button', { class: 'card', onclick: () => nav('#/piece/' + encodeURIComponent(p.id)) },
@@ -580,6 +611,7 @@
     setChrome({ title: p.title || 'Untitled', back: true, fab: false });
     mount('tpl-detail');
     const here = location.hash;
+    PhotoCache.touch(p.id); // recently opened pieces keep their photos on the device
 
     // A piece synced from another device shows its summary first; notes and photos load now.
     if (p.stub) {
@@ -597,14 +629,28 @@
     if (!ids.length || p.stub) {
       gallery.replaceChildren(el('div', { class: 'no-photo', html: ICON_POT }));
     } else {
-      gallery.classList.toggle('single', ids.length === 1);
-      const imgs = await Promise.all(ids.map(async (pid) => {
+      // Photos removed from this device to save room download again from Drive.
+      const missing = (await Promise.all(ids.map((pid) => DB.getPhoto(pid)))).filter((x) => !x).length;
+      let note = null;
+      if (missing) {
+        note = el('p', { class: 'muted small loading-note' }, navigator.onLine && connected()
+          ? 'Downloading ' + (missing === 1 ? 'a photo' : missing + ' photos') + ' from Google Drive…'
+          : (missing === 1 ? 'A photo is' : missing + ' photos are') + ' kept in Google Drive to save room. ' +
+            (navigator.onLine ? 'Reconnect Google Drive to see them.' : 'They\'ll download when you\'re back online.'));
+        gallery.parentElement.after(note);
+      }
+      const imgs = (await Promise.all(ids.map(async (pid) => {
         const u = await piecePhotoUrl(p, pid, 'full');
         return u ? el('img', { src: u, alt: p.title || 'Photo', onclick: () => lightbox(u) }) : null;
-      }));
-      gallery.replaceChildren(...imgs.filter(Boolean));
-      if (ids.length > 1) {
-        const dots = el('div', { class: 'gallery-dots' }, ids.map((_, i) => el('span', { class: i === 0 ? 'on' : '' })));
+      }))).filter(Boolean);
+      if (!gallery.isConnected) return;
+      if (note && imgs.length === ids.length) note.remove();
+      if (missing) PhotoCache.check();
+      gallery.classList.toggle('single', imgs.length <= 1);
+      if (imgs.length) gallery.replaceChildren(...imgs);
+      else gallery.replaceChildren(el('div', { class: 'no-photo', html: ICON_POT }));
+      if (imgs.length > 1) {
+        const dots = el('div', { class: 'gallery-dots' }, imgs.map((_, i) => el('span', { class: i === 0 ? 'on' : '' })));
         gallery.parentElement.after(dots);
         // Arrows, so the carousel also works with a mouse.
         const prev = $('#galleryPrev'); const next = $('#galleryNext');
@@ -651,6 +697,7 @@
         fresh.updatedAt = Date.now();
         await DB.putPiece(fresh);
         markChanged();
+        PhotoCache.check();
         toast(added.length === 1 ? 'Photo added' : added.length + ' photos added');
         if (location.hash === here) { showLastPhoto = true; route(); }
       });
@@ -742,6 +789,7 @@
       });
     }
     const isNew = !existing;
+    if (existing) PhotoCache.touch(existing.id);
     const piece = existing ? structuredClone(existing) : {
       id: DB.uid(), title: '', photoIds: [], clays: [], method: 'wheel', glazes: [],
       bisqueFiringType: '', bisqueCone: '', glazeFiringType: '', glazeCone: '', stage: 'greenware', dateMade: today(), dateBisque: '', dateGlazed: '',
@@ -826,12 +874,20 @@
 
     // Photos.
     const grid = $('#photoGrid');
+    // Tap a photo to use it as the piece's thumbnail (the newest photo until one is picked).
     async function drawPhotos() {
+      const cover = PhotoCache.coverOf(piece);
+      $('#thumbHint').hidden = piece.photoIds.length < 2;
       const items = await Promise.all(piece.photoIds.map(async (pid, i) => {
         const u = await piecePhotoUrl(piece, pid);
-        return el('div', { class: 'photo-item' },
-          u ? el('img', { src: u, alt: 'Photo ' + (i + 1) }) : null,
-          i === 0 && piece.photoIds.length > 1 ? el('span', { class: 'cover' }, 'Cover') : null,
+        const isCover = pid === cover;
+        return el('div', { class: 'photo-item' + (isCover && piece.photoIds.length > 1 ? ' is-cover' : '') },
+          el('button', {
+            type: 'button', class: 'pick-thumb', 'aria-pressed': String(isCover),
+            'aria-label': isCover ? 'Photo ' + (i + 1) + ', the thumbnail' : 'Use photo ' + (i + 1) + ' as the thumbnail',
+            onclick: () => { piece.coverPhotoId = pid; drawPhotos(); },
+          }, u ? el('img', { src: u, alt: '' }) : null),
+          isCover && piece.photoIds.length > 1 ? el('span', { class: 'cover' }, 'Thumbnail') : null,
           el('button', {
             type: 'button', class: 'remove', 'aria-label': 'Remove photo', html: ICON_X,
             onclick: () => { piece.photoIds.splice(i, 1); drawPhotos(); },
@@ -879,6 +935,7 @@
       piece.stage = (form.querySelector('input[name=stage]:checked') || {}).value || 'greenware';
       ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'].forEach((k) => { piece[k] = f[k].value; });
       piece.notes = f.notes.value.trim();
+      if (piece.coverPhotoId && !piece.photoIds.includes(piece.coverPhotoId)) delete piece.coverPhotoId; // that photo was removed
       for (const cf of Settings.fields()) {
         const input = form.elements['cf:' + cf.id];
         if (!input) continue;
@@ -900,6 +957,7 @@
       const removed = [...originalPhotos, ...addedPhotos].filter((pid) => !kept.has(pid));
       await DB.deletePhotos(removed);
       markChanged();
+      PhotoCache.check();
       toast((isNew ? 'Piece added' : 'Saved') + (!navigator.onLine && connected() ? '. It will sync when you\'re back online.' : ''), !navigator.onLine ? 3000 : undefined);
       DB.requestPersistence();
       if (isNew) nav('#/piece/' + encodeURIComponent(piece.id), true);
@@ -910,6 +968,26 @@
   }
 
   /* ---------- backup view ---------- */
+
+  const fmtLimit = (n) => fmtBytes(n).replace(/\.0 MB$/, ' MB');
+
+  /** The "Photo storage" part of Settings: how much room photos use against the limit. */
+  async function drawStorage(est) {
+    const usageEl = $('#photoUsage');
+    if (!usageEl) return;
+    const [{ bytes, limit }, e] = await Promise.all([PhotoCache.usage(), est ? est : DB.estimate()]);
+    if (!usageEl.isConnected) return;
+    const frac = Math.min(1, bytes / limit);
+    $('#photoMeterBar').style.width = Math.max(1, Math.round(frac * 100)) + '%';
+    $('#photoMeter').classList.toggle('full', bytes > limit);
+    let text = 'Photos use ' + fmtBytes(bytes) + ' of ' + fmtLimit(limit) + '. ';
+    text += PhotoCache.canRemoveNow()
+      ? 'When they need more room, full-size photos of the pieces you opened longest ago are removed from this device. They stay in Google Drive and download again when you open the piece.'
+      : 'Photos are only removed from this device once they\'re in Google Drive, so ' +
+        (bytes > limit ? 'this device is over the limit. Connect Google Drive to make room.' : 'connect Google Drive to let the app make room when needed.');
+    if (e && e.quota && limit > e.quota * 0.8) text += ' This browser allows about ' + fmtBytes(e.quota) + ' in all.';
+    usageEl.textContent = text;
+  }
 
   async function renderBackup() {
     setChrome({ title: 'Settings', back: true, fab: false });
@@ -922,8 +1000,8 @@
     if (!view.isConnected) return; // left Settings while reading
     const stubs = pieces.filter((p) => p.stub).length;
     $('#localStats').textContent = pieces.length + (pieces.length === 1 ? ' piece' : ' pieces') + ', ' +
-      photoIds.length + (photoIds.length === 1 ? ' photo' : ' photos') +
-      (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used' : '') +
+      photoIds.length + (photoIds.length === 1 ? ' full-size photo' : ' full-size photos') + ' on this device' +
+      (est && est.usage ? ' · about ' + fmtBytes(est.usage) + ' used in all' : '') +
       (stubs ? '. ' + stubs + ' synced ' + (stubs === 1 ? 'piece loads its' : 'pieces load their') + ' notes and photos when opened.' : '');
     const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
     if (!view.isConnected) return;
@@ -933,7 +1011,22 @@
     else if (!isInstalled()) $('#persistLabel').textContent = 'Tip: install the app (or add it to your home screen) so the browser is less likely to clear its storage.';
     else $('#persistLabel').hidden = true;
 
+    // Photo storage limit.
+    const limitSel = $('#photoLimit');
+    const choices = [...PhotoCache.CHOICES_MB];
+    if (!choices.includes(PhotoCache.limitMB())) choices.push(PhotoCache.limitMB()), choices.sort((a, b) => a - b);
+    limitSel.replaceChildren(...choices.map((mb) => el('option', { value: String(mb) },
+      fmtLimit(mb * 1024 * 1024) + (mb === PhotoCache.DEFAULT_MB ? ' (default)' : ''))));
+    limitSel.value = String(PhotoCache.limitMB());
+    limitSel.addEventListener('change', async () => {
+      const r = await PhotoCache.setLimitMB(Number(limitSel.value));
+      if (r && r.removed) toast('Made room by removing ' + r.removed + (r.removed === 1 ? ' photo' : ' photos') + ' that are in Google Drive', 3000);
+      drawStorage();
+    });
+    drawStorage(est);
+
     function draw() {
+      drawStorage();
       $('#driveUnconfigured').hidden = Drive.configured;
       $('#driveSignedOut').hidden = !Drive.configured || Drive.isSignedIn();
       const reconnect = Drive.needsReconnect();
@@ -1324,6 +1417,7 @@
         toast('Synced with Google Drive', 1600);
       }
       if (await seedLists(true)) await refreshPending();
+      PhotoCache.check(); // photos just uploaded can now be removed from the device if it's full
       if (pendingCount && connected()) runSync({ quiet: true }); // changes made while syncing
       return stats;
     });
@@ -1375,7 +1469,7 @@
   function loadOnDemand(id) {
     if (!connected()) return Promise.reject(Object.assign(new Error('Not connected'), { reconnect: true }));
     if (!loading.has(id)) {
-      loading.set(id, Sync.loadPiece(id).finally(() => loading.delete(id)));
+      loading.set(id, Sync.loadPiece(id).finally(() => { loading.delete(id); PhotoCache.check(); }));
     }
     return loading.get(id);
   }
@@ -1401,6 +1495,12 @@
     route();
 
     Sync.init({ makeThumb });
+    PhotoCache.init({
+      canRemove: () => connected() && !!Drive.getFolder(), // only photos already in Drive are ever removed
+      root: () => (Drive.getFolder() || {}).id,
+      onChange: () => { if (onBackupStateChange && location.hash.startsWith('#/backup')) drawStorage(); },
+    });
+    PhotoCache.check(3000);
     seedLists(false);
     try { localStorage.removeItem('potteryLog.changeSeq'); localStorage.removeItem('potteryLog.backedSeq'); localStorage.removeItem('potteryLog.lastBackup'); localStorage.removeItem('potteryLog.deviceId'); } catch (e) { /* ignore */ }
     refreshPending().catch(() => {});

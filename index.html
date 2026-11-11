@@ -121,6 +121,7 @@
       <div class="field">
         <span>Photos</span>
         <div class="photo-grid" id="photoGrid"></div>
+        <p class="muted small" id="thumbHint" hidden>Tap a photo to use it as the thumbnail in your list.</p>
         <label class="btn btn-secondary btn-small photo-add">
           <input type="file" accept="image/*" multiple id="photoInput" hidden>
           Add photos
@@ -303,6 +304,12 @@
       <div class="panel">
         <h2>On this device</h2>
         <p class="muted" id="localStats"></p>
+        <label class="field storage-limit">
+          <span>Photo storage limit</span>
+          <select id="photoLimit"></select>
+        </label>
+        <div class="meter" id="photoMeter"><div id="photoMeterBar"></div></div>
+        <p class="muted small" id="photoUsage"></p>
         <p class="muted small" id="persistLabel"></p>
       </div>
 
@@ -312,6 +319,7 @@
 
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
+  <script src="js/photo-cache.js"></script>
   <script src="js/drive.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/sync.js"></script>

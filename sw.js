@@ -1,6 +1,6 @@
 /* Pottery Log service worker: caches the app shell so it opens offline.
  * Bump VERSION whenever you change any of the files below. */
-const VERSION = 'v19';
+const VERSION = 'v20';
 const CACHE = 'pottery-log-' + VERSION;
 const SHELL = [
   './',
@@ -8,6 +8,7 @@ const SHELL = [
   'css/styles.css',
   'js/config.js',
   'js/db.js',
+  'js/photo-cache.js',
   'js/drive.js',
   'js/settings.js',
   'js/sync.js',
