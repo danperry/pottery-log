@@ -1044,7 +1044,7 @@
       const name = el('input', { maxlength: '60', value: f.name, autocomplete: 'off' });
       const type = el('select', null, Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
       const remember = el('input', { type: 'checkbox', checked: f.type !== 'text' || f.remember !== false });
-      const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember values for a drop-down'));
+      const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember entered values for a drop-down'));
       const list = el('textarea', { rows: '4' });
       list.value = (f.type === 'choice' ? f.options : f.values || []).join('\n');
       const listLabel = el('span');
