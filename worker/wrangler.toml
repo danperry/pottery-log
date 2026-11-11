@@ -1,0 +1,17 @@
+# Cloudflare Worker that lets Pottery Log stay signed in to Google Drive.
+# Deploy from this folder with `npx wrangler deploy` (see the README).
+name = "pottery-log-auth"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+# Where the app lives. Sign-in redirects back here, and /auth/token and /auth/revoke
+# only accept requests from this URL's origin.
+APP_URL = "https://danperry.github.io/pottery-log/"
+
+# Secrets are NOT set here. Set them once with:
+#   npx wrangler secret put GOOGLE_CLIENT_ID
+#   npx wrangler secret put GOOGLE_CLIENT_SECRET
+#   npx wrangler secret put TOKEN_ENC_KEY
+# For local `wrangler dev`, put them in worker/.dev.vars (git-ignored).

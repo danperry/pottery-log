@@ -4,7 +4,7 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework.
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
-- **Optional backup to your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive.
+- **Optional backup to your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive. You sign in once and stay connected, thanks to a tiny sign-in Worker on Cloudflare's free tier (`worker/`).
 - **Installable** on Android (and desktop Chrome) through the web app manifest, and it opens offline thanks to a small service worker.
 
 ## Files
@@ -13,11 +13,14 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 index.html               App shell and view templates
 privacy.html             Privacy policy (link it on the OAuth consent screen)
 css/styles.css           Styles (light and dark)
-js/config.js             Your Google OAuth client ID and API key go here
-js/db.js                 IndexedDB storage (pieces + photos)
-js/drive.js              Google sign-in and Drive API calls
+js/config.js             Worker URL, Google client ID and API key go here
+js/db.js                 IndexedDB storage (pieces, photos, encrypted sign-in)
+js/drive.js              Google sign-in (via the Worker) and Drive API calls
 js/app.js                Views, routing, photo handling, backup/restore
 sw.js                    Service worker (offline app shell)
+worker/src/index.js      Cloudflare Worker that keeps you signed in (see "Sign-in Worker")
+worker/wrangler.toml     Worker settings: name and APP_URL (secrets are set separately)
+worker/package.json      Marks the Worker code as an ES module; no dependencies
 manifest.webmanifest     Home-screen install metadata
 icons/                   App icons (192, 512, maskable 512)
 .nojekyll                Tells GitHub Pages to serve files as-is
@@ -57,7 +60,7 @@ In the current console this is under **Google Auth Platform** (older consoles ca
    `https://www.googleapis.com/auth/drive.file` ("See, edit, create, and delete only the specific Google Drive files you use with this app"). It is a *non-sensitive* scope, so no Google verification is needed for it.
 4. **Test users:** while the app's publishing status is **Testing**, only listed accounts can sign in. Add your own Google account (and anyone else who'll use it, up to 100).
 
-> **Testing vs. production.** In *Testing* mode Google shows an "unverified app" warning and may expire a user's consent after 7 days, so you'd occasionally sign in again. To remove that, go to **Audience** and click **Publish app**. Because `drive.file` is non-sensitive, publishing doesn't require a security review; Google may ask you to confirm the app's branding: use the app's URL as the home page and `…/pottery-log/privacy.html` as the privacy policy link (see [Privacy](#privacy)). For personal use, staying in Testing is fine.
+> **Set the publishing status to "In production".** While the app is in *Testing*, Google expires refresh tokens after **7 days**, so everyone would have to reconnect every week. That defeats the point of the sign-in Worker. Go to **Audience** and click **Publish app**. Because `drive.file` is non-sensitive, publishing doesn't require a security review. Google may ask you to confirm the app's branding: use the app's URL as the home page and `…/pottery-log/privacy.html` as the privacy policy link (see [Privacy](#privacy)). Until Google verifies the app, people see an "unverified app" notice on the consent screen, which they can click past. The 100-user cap applies until then.
 
 ### 4. Create the OAuth client ID
 
@@ -66,8 +69,8 @@ In the current console this is under **Google Auth Platform** (older consoles ca
 3. **Authorized JavaScript origins:** add the *origin* only (scheme + host, no path, no trailing slash):
    - `https://<your-username>.github.io`
    - `http://localhost:8000` (optional, for local testing)
-4. **Authorized redirect URIs:** leave empty. The app uses the Google Identity Services popup token flow, which doesn't need one.
-5. Click **Create** and copy the **Client ID** (it ends in `.apps.googleusercontent.com`). You don't need the client secret; a browser app must never use one.
+4. **Authorized redirect URIs:** add your Worker's callback URL. You'll know it after deploying the Worker (see [Sign-in Worker](#sign-in-worker)): `https://pottery-log-auth.<your-workers-subdomain>.workers.dev/auth/callback`. For local Worker testing, also add `http://localhost:8787/auth/callback`.
+5. Click **Create**, then copy the **Client ID** (ends in `.apps.googleusercontent.com`) and the **Client secret**. The secret goes only into the Worker as a secret. Never put it in the app or the repo.
 
 ### 5. Create an API key for the folder picker
 
@@ -85,21 +88,65 @@ Edit `js/config.js`:
 
 ```js
 window.POTTERY_CONFIG = {
+  authWorkerUrl: 'https://pottery-log-auth.your-subdomain.workers.dev', // no trailing slash
   googleClientId: '1234567890-abc123def456.apps.googleusercontent.com',
   googleApiKey: 'AIzaSy...your-key...',
   googleAppId: '', // leave empty; it's the number at the start of the client ID
 };
 ```
 
-Commit and push. The client ID and API key are public by design: they're visible in every page that uses Google sign-in or the Picker. They're fine in a public repo, because they only work from the sites you allowed in steps 4 and 5. `googleAppId` is your Cloud project number. The app reads it from the start of the client ID, so you only need to fill it in if your client ID doesn't start with that number. The Picker uses it so that picking a folder grants the app access to that folder.
+Commit and push. None of these are secrets. The client ID and API key are public by design: they're visible in every page that uses Google sign-in or the Picker. They're fine in a public repo, because they only work from the sites you allowed in steps 4 and 5. `googleAppId` is your Cloud project number. The app reads it from the start of the client ID, so you only need to fill it in if your client ID doesn't start with that number. The Picker uses it so that picking a folder grants the app access to that folder.
 
-Origin changes can take a few minutes to take effect on Google's side. If you see `Error 400: origin_mismatch` or `redirect_uri_mismatch`, double-check the origin in step 4 exactly matches the address bar (https, no path). If the folder picker says "The API developer key is invalid", check that the key's website restriction includes your site and that the Google Picker API is enabled.
+Changes in Google Cloud can take a few minutes to take effect. If you see `Error 400: redirect_uri_mismatch`, the callback URL in step 4 must match the Worker's address exactly (https, ending in `/auth/callback`). If the folder picker says "The API developer key is invalid", check that the key's website restriction includes your site and that the Google Picker API is enabled.
+
+## Sign-in Worker
+
+Browser-only Google sign-in can't keep you signed in: it only hands out access tokens that last an hour, and getting a long-lived *refresh token* needs the OAuth client secret, which can't live in a public web page. `worker/` is a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) that holds the secret and does just that part. It stores nothing.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /auth/start` | Sends the browser to Google's consent screen using the authorization-code flow with PKCE, `access_type=offline`, `prompt=consent` and the `drive.file` scope only. A short-lived, HttpOnly cookie ties the callback to this browser. |
+| `GET /auth/callback` | Exchanges Google's code for tokens using the client secret, encrypts the refresh token with AES-GCM (key `TOKEN_ENC_KEY`), and redirects back to the app with the encrypted blob in the URL fragment. The fragment isn't sent to GitHub's servers, and the app removes it from the address bar and history straight away. |
+| `POST /auth/token` | Takes `{ blob }`, decrypts it, asks Google for a fresh access token, and returns only `{ access_token, expires_in, expires_at }`. Returns `401 {"error":"invalid_grant"}` when the sign-in is no longer valid. |
+| `POST /auth/revoke` | Takes `{ blob }` and revokes the refresh token with Google. Used by **Disconnect**. |
+
+`/auth/token` and `/auth/revoke` only answer requests from the app's origin (`APP_URL`), and send CORS headers for that origin only. The app keeps the encrypted blob in IndexedDB, and the access token in memory only. Neither is ever put in `localStorage`. The blob is useless without `TOKEN_ENC_KEY`.
+
+### Deploying it (free tier)
+
+You need a free Cloudflare account and Node.js 18 or later.
+
+```sh
+cd worker
+npx wrangler login                      # opens the browser once
+# Check APP_URL in wrangler.toml matches your app, e.g. https://<you>.github.io/pottery-log/
+npx wrangler deploy                     # prints https://pottery-log-auth.<subdomain>.workers.dev
+```
+
+Then set the three secrets. Each command prompts for the value, which is stored encrypted by Cloudflare and never in the repo:
+
+```sh
+npx wrangler secret put GOOGLE_CLIENT_ID       # the OAuth client ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET   # the OAuth client secret
+openssl rand -base64 32                        # make a key, then paste it into:
+npx wrangler secret put TOKEN_ENC_KEY
+```
+
+Finally:
+
+1. In Google Cloud, add `https://pottery-log-auth.<subdomain>.workers.dev/auth/callback` as an **Authorized redirect URI** on the OAuth client (step 4 above).
+2. Put `https://pottery-log-auth.<subdomain>.workers.dev` in `authWorkerUrl` in `js/config.js`, then commit and push.
+3. Make sure the consent screen is **In production** (step 3 above), or sign-ins will expire after 7 days.
+
+Keep `TOKEN_ENC_KEY` the same from then on. Changing it makes every saved sign-in unreadable, and everyone will see **Reconnect Google Drive** once. That's a quick way to sign everyone out if you ever need to.
+
+To try the Worker locally, put the three secrets in `worker/.dev.vars` (one `NAME=value` per line, git-ignored). Set `APP_URL = "http://localhost:8000/"`, run `npx wrangler dev` (it serves on port 8787), and point `authWorkerUrl` at `http://localhost:8787`.
 
 ## Using backup and restore
 
 Tap the cloud icon in the top bar.
 
-- **Sign in with Google** opens Google's popup. Grant access to "the specific Google Drive files you use with this app".
+- **Sign in with Google** takes you to Google's consent screen and back. Grant access to "the specific Google Drive files you use with this app". You stay signed in from then on.
 - **Backup folder** shows where backups go. Set it before your first backup:
   - **Choose folder** opens Google's folder picker. Pick any folder in My Drive or a shared drive. Picking it gives the app access to that one folder, and nothing else in your Drive.
   - **New folder** creates a folder with the name you type (default `Pottery Log`) at the top of My Drive.
@@ -111,7 +158,10 @@ If you change the backup folder, the next backup copies everything into the new 
 
 To move to a new phone: back up on the old one. Then install the app on the new one, sign in, use **Choose folder** to pick the same folder, and restore.
 
-The app remembers your Google account, backup folder and auto-backup setting until you tap **Sign out**, including across app restarts. Google gives browser-only apps access tokens that last about an hour, with no long-lived refresh token, so the app keeps the current token on the device and asks Google for a new one when it runs out. Google only allows that at the moment you tap something. After an hour or so, the next save (or **Back up now**) briefly flashes Google's popup, which closes by itself without asking anything. If popups are blocked, allow them for your github.io site.
+The app stays connected until you tap **Disconnect**, across restarts and without asking again. Before each Drive call it gets a fresh access token from the Worker if it has none, or if the one it has expires within 5 minutes.
+
+- **Reconnect Google Drive:** Google ends a sign-in when you remove the app's access in your Google account, or when it goes unused for 6 months. It also ends after 7 days while the consent screen is still in Testing. When that happens, the app forgets the saved sign-in and shows a single **Reconnect Google Drive** button. Everything on the device stays, and you can keep logging pieces. Changes made meanwhile are backed up after you reconnect.
+- **Disconnect** revokes the app's access with Google and deletes the saved sign-in from this device. Your backups in Drive and your pieces on the device are kept. If Google can't be reached at that moment, the app says so; you can also remove access at <https://myaccount.google.com/connections>.
 
 ## Adding to an Android home screen
 
@@ -133,6 +183,6 @@ When you change any file, bump `VERSION` in `sw.js` so installed copies refresh 
 
 ## Privacy
 
-There's no server. Pieces and photos stay in your browser's storage on your device, and in your own Google Drive if you back up. The app never sees the rest of your Drive.
+Pieces and photos stay in your browser's storage on your device, and in your own Google Drive if you back up. The app never sees the rest of your Drive. The only server is the sign-in Worker. It handles your Google refresh token just long enough to get access tokens, never sees your pieces or files, and stores nothing.
 
 The full policy is in [`privacy.html`](privacy.html), served at `https://<your-username>.github.io/pottery-log/privacy.html`. Use that URL as the **Privacy policy link** on the OAuth consent screen (Google Auth Platform → **Branding**). The home page link is `https://<your-username>.github.io/pottery-log/`.

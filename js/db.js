@@ -1,13 +1,14 @@
 /* Local storage for Pottery Log, backed by IndexedDB.
- * Two object stores:
+ * Object stores:
  *   pieces  – one record per piece (plain JSON)
  *   photos  – { id, blob, thumb, type } image blobs, referenced by piece.photoIds
+ *   auth    – { id: 'google', blob } the encrypted Google refresh token from the auth Worker
  */
 (function () {
   'use strict';
 
   const DB_NAME = 'pottery-log';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let dbPromise = null;
 
   function open() {
@@ -22,6 +23,9 @@
         }
         if (!db.objectStoreNames.contains('photos')) {
           db.createObjectStore('photos', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('auth')) {
+          db.createObjectStore('auth', { keyPath: 'id' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -123,6 +127,19 @@
       const keys = await reqToPromise(photoStore.getAllKeys());
       keys.forEach((k) => { if (!keepPhotoIds.has(k)) photoStore.delete(k); });
       return txDone(tx);
+    },
+
+    /** Encrypted Google sign-in blob (only the auth Worker can read it). */
+    async getAuthBlob() {
+      const s = await store('auth', 'readonly');
+      const r = await reqToPromise(s.get('google'));
+      return r ? r.blob : null;
+    },
+
+    async setAuthBlob(blob) {
+      const s = await store('auth', 'readwrite');
+      if (blob) await reqToPromise(s.put({ id: 'google', blob, savedAt: Date.now() }));
+      else await reqToPromise(s.delete('google'));
     },
 
     async requestPersistence() {
