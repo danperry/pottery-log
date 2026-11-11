@@ -200,12 +200,12 @@ Renaming a piece renames its folder. Deleting a piece moves its folder to Drive'
 
 Glazes and clay bodies are picked from drop-downs on the edit form. Choose **+ New glaze…** or **+ New clay body…** to type one that isn't in the list yet; it's remembered when you save the piece. A piece can have several glazes and several clay bodies.
 
-Each clay body in the list has its own cone (for example, B-Mix at cone 6), chosen from a drop-down when you add it. This is separate from the piece's firing cone. Edit both lists under **Settings → Glazes and clays**: add or remove names and change a clay's cone. Removing a name only takes it out of the drop-down; pieces that use it keep it, and it stays out of the list when you edit those pieces.
+Cones are recorded per piece, in the Bisque and Glaze sections, rather than on the clay. Edit both lists under **Settings → Glazes and clays**: add or remove names. Removing a name only takes it out of the drop-down; pieces that use it keep it, and it stays out of the list when you edit those pieces.
 
 The first time the app opens after this update, it fills the lists from the glazes and clays your pieces already use. The lists are stored in `pottery-log-index.json` under `"settings"` and sync like custom fields (latest save wins):
 
 ```json
-"settings": { "glazes": ["Celadon", "Shino"], "clays": [{ "name": "B-Mix", "cone": "6" }], … }
+"settings": { "glazes": ["Celadon", "Shino"], "clays": [{ "name": "B-Mix" }], … }
 ```
 
 The edit form has a **Bisque** section and a **Glaze** section, each with its own Firing type and Cone. They're saved separately as `"bisqueFiring"` and `"glazeFiring"`. A piece saved before this change had one `"firing"`; it's read as the glaze firing.
