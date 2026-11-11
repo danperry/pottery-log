@@ -17,10 +17,9 @@
   const THUMB_MAX = 480;
   const LAST_SYNC_KEY = 'potteryLog.lastSync';
   const FILTER_KEY = 'potteryLog.filter';
-  const AUTO_KEY = 'potteryLog.autoBackup';
+  const CONNECT_TIP_KEY = 'potteryLog.connectTipDismissed';
   const FIELD_FILTER_KEY = 'potteryLog.fieldFilters'; // chosen values, per device
   const INSTALL_TIP_KEY = 'potteryLog.installTipDismissed';
-  const PENDING_AUTO_KEY = 'potteryLog.pendingAutoBackup'; // choice made just before leaving for Google sign-in
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const app = $('#app');
@@ -198,6 +197,7 @@
 
   function route() {
     revokeUrls();
+    if (typeof updateBadge === 'function') updateBadge();
     const h = location.hash.replace(/^#\/?/, '');
     const [view, id] = h.split('/');
     window.scrollTo(0, 0);
@@ -271,9 +271,30 @@
     return 'Tap ' + ICON_MENU + ' the browser menu, then <strong>Add to Home screen</strong> or <strong>Install app</strong>.';
   }
 
+  /** First-use tip: connect Google Drive. Returns true if shown. */
+  function drawConnectTip() {
+    const tip = $('#connectTip');
+    if (!tip) return false;
+    const show = Drive.configured && !Drive.isSignedIn() && !Drive.needsReconnect() && !store(CONNECT_TIP_KEY);
+    tip.hidden = !show;
+    if (!show) return false;
+    tip.replaceChildren(
+      el('img', { src: 'icons/icon-192.png', alt: '' }),
+      el('div', { class: 'tip-body' },
+        el('strong', { class: 'tip-title' }, 'Keep your pieces safe in Google Drive'),
+        el('p', null, 'Connect once and every piece, with its photos, syncs to a folder in your own Drive and to your other devices.'),
+        el('button', { class: 'btn btn-primary btn-small', type: 'button', onclick: () => Drive.signIn() }, 'Connect Google Drive')),
+      el('button', {
+        class: 'icon-btn', type: 'button', 'aria-label': 'Dismiss tip', html: ICON_X,
+        onclick: () => { store(CONNECT_TIP_KEY, Date.now()); tip.hidden = true; drawInstallTip(); },
+      }));
+    return true;
+  }
+
   function drawInstallTip() {
     const tip = $('#installTip');
     if (!tip) return;
+    if (drawConnectTip()) { tip.hidden = true; return; } // one tip at a time
     const how = store(INSTALL_TIP_KEY) ? null : installHowTo();
     if (!how) { tip.hidden = true; return; }
     const body = el('div', { class: 'tip-body' },
@@ -465,7 +486,7 @@
       const note = el('p', { class: 'muted small loading-note' }, 'Loading notes and photos from Google Drive…');
       $('#dTitle').after(note);
       loadOnDemand(p.id).then(() => { if (location.hash === here) route(); }).catch((err) => {
-        note.textContent = err.reconnect ? 'Reconnect Google Drive (cloud icon) to see this piece\'s notes and photos.'
+        note.textContent = err.reconnect ? 'Tap Reconnect at the top to see this piece\'s notes and photos.'
           : !navigator.onLine ? 'You\'re offline. Notes and photos will load when you\'re back online.'
           : 'Could not load this piece from Google Drive: ' + err.message;
       });
@@ -772,7 +793,6 @@
       $('#driveSignedOut').hidden = !Drive.configured || Drive.isSignedIn();
       const reconnect = Drive.needsReconnect();
       $('#reconnectNote').hidden = !reconnect;
-      $('#autoBackupConnectRow').hidden = reconnect;
       $('#signInLabel').textContent = reconnect ? 'Reconnect Google Drive' : 'Sign in with Google';
       $('#driveSignedIn').hidden = !Drive.configured || !Drive.isSignedIn();
       const acct = Drive.getAccount();
@@ -780,7 +800,6 @@
       const folder = Drive.getFolder();
       $('#folderLabel').textContent = folder ? folder.name : 'Not chosen yet';
       $('#pickFolderBtn').textContent = folder ? 'Change folder' : 'Choose folder';
-      $('#autoBackupToggle').checked = store(AUTO_KEY) === true;
       const last = store(LAST_SYNC_KEY);
       let label = syncing ? 'Syncing…'
         : last && folder && last.root === folder.id ? 'Last synced: ' + fmtDateTime(last.at) + '.' : 'Not synced yet from this device.';
@@ -803,13 +822,7 @@
     // Redraw when a background sync finishes while this page is open.
     onBackupStateChange = draw;
 
-    $('#signInBtn').addEventListener('click', () => {
-      // Remember the auto-sync choice across the trip to Google and back.
-      if (!Drive.needsReconnect()) {
-        try { sessionStorage.setItem(PENDING_AUTO_KEY, $('#autoBackupConnect').checked ? '1' : '0'); } catch (e) { /* ignore */ }
-      }
-      Drive.signIn();
-    });
+    $('#signInBtn').addEventListener('click', () => Drive.signIn());
 
     // Custom fields.
     function drawCustomFields() {
@@ -903,15 +916,6 @@
       }
     });
 
-    $('#autoBackupToggle').addEventListener('change', (e) => {
-      store(AUTO_KEY, e.target.checked);
-      updateBadge();
-      if (e.target.checked) {
-        toast(Drive.getFolder() ? 'Will sync after every save' : 'Choose a Drive folder to start syncing');
-        if (pendingCount) runSync();
-      }
-    });
-
     $('#signOutBtn').addEventListener('click', async () => {
       if (!confirm('Disconnect Google Drive? Your files stay in Drive and your pieces stay on this device. Pieces from Drive that haven\'t been opened here yet will show only their summary until you reconnect.')) return;
       busy(true, 'Disconnecting…', 0.5);
@@ -954,7 +958,6 @@
   }
 
   const connected = () => Drive.configured && Drive.isSignedIn();
-  const autoOn = () => connected() && store(AUTO_KEY) === true;
 
   async function refreshPending() {
     const f = Drive.getFolder();
@@ -966,14 +969,17 @@
     const pending = Drive.configured && ((Drive.isSignedIn() && pendingCount > 0) || Drive.needsReconnect());
     backupNavBtn.classList.toggle('dirty', pending && !syncing);
     backupNavBtn.classList.toggle('syncing', syncing);
-    backupNavBtn.setAttribute('aria-label', syncing ? 'Syncing…'
-      : Drive.needsReconnect() ? 'Backup and settings (Google Drive needs reconnecting)'
-      : pending ? 'Backup and settings (changes not synced yet)' : 'Backup and settings');
+    backupNavBtn.setAttribute('aria-label', syncing ? 'Settings (syncing…)'
+      : Drive.needsReconnect() ? 'Settings (Google Drive needs reconnecting)'
+      : pending ? 'Settings (changes not synced yet)' : 'Settings');
+    // Lost the Google connection: say so on every screen, with a one-tap fix.
+    $('#reconnectBar').hidden = !(Drive.configured && Drive.needsReconnect()) || location.hash.startsWith('#/backup');
   }
+  $('#reconnectBarBtn').addEventListener('click', () => Drive.signIn());
 
   /** Call after any local change to a piece. */
   function markChanged() {
-    refreshPending().then(() => { if (autoOn() && pendingCount) runSync(); });
+    refreshPending().then(() => { if (connected() && pendingCount) runSync({ quiet: true }); });
   }
 
   function syncSummary(st) {
@@ -1016,7 +1022,7 @@
       if (failed) {
         if (opts.throws) throw failed;
         if (navigator.onLine || failed.reconnect) {
-          toast(failed.reconnect ? 'Google Drive needs reconnecting. Tap the cloud icon.' : 'Sync failed: ' + failed.message, 5000);
+          if (!failed.reconnect) toast('Sync failed: ' + failed.message, 5000); // a lost sign-in shows the Reconnect bar
         }
         return null; // wait for the next save, launch or reconnect instead of retrying in a loop
       }
@@ -1027,7 +1033,7 @@
       } else if (stats.pushed && !opts.quiet && !opts.throws) {
         toast('Synced with Google Drive', 1600);
       }
-      if (pendingCount && autoOn()) runSync({ quiet: true }); // changes made while syncing
+      if (pendingCount && connected()) runSync({ quiet: true }); // changes made while syncing
       return stats;
     });
   }
@@ -1067,9 +1073,7 @@
     refreshPending().catch(() => {});
 
     if (auth && auth.connected) {
-      let pendingAuto = null;
-      try { pendingAuto = sessionStorage.getItem(PENDING_AUTO_KEY); sessionStorage.removeItem(PENDING_AUTO_KEY); } catch (e) { /* ignore */ }
-      if (pendingAuto !== null) store(AUTO_KEY, pendingAuto === '1');
+      try { localStorage.removeItem('potteryLog.autoBackup'); } catch (e) { /* sync is always on now */ }
       toast(Drive.getFolder() ? 'Connected to Google Drive' : 'Connected. Now choose or create a backup folder.', 3500);
       if (onBackupStateChange && location.hash.startsWith('#/backup')) onBackupStateChange();
     } else if (auth && auth.error) {

@@ -146,7 +146,7 @@ To try the Worker locally, put the three secrets in `worker/.dev.vars` (one `NAM
 
 ## Syncing with Google Drive
 
-Tap the cloud icon in the top bar.
+Tap the gear icon in the top bar to open Settings. Until you connect, the home screen also shows a **Connect Google Drive** tip.
 
 - **Sign in with Google** takes you to Google's consent screen and back. Grant access to "the specific Google Drive files you use with this app". You stay signed in from then on.
 - **Drive folder** is where your pieces go. Set it once on each device:
@@ -156,7 +156,8 @@ Tap the cloud icon in the top bar.
 
   Some browsers (for example Comet) block Google's folder picker, which then says "The API developer key is invalid". Use **New folder** there, or pick the folder once in Chrome; after that it's listed on every browser.
 - **Sync now** brings this device and the folder up to date with each other. The app also syncs by itself whenever it opens, when you come back to it after a minute or more, and when the connection returns.
-- **Sync automatically whenever I save** (offered next to the sign-in button, and switchable later) also syncs after every save, stage change or delete. The cloud icon pulses while it runs and shows a dot when there are changes not yet in Drive.
+- **Syncing is automatic** once you're connected: when the app opens and after every save, stage change or delete. The gear icon spins while it runs and shows a dot when there are changes not yet in Drive.
+- **Lost connection:** if Google ends the sign-in, a **Reconnect** bar appears at the top of every screen. Your pieces stay on the device meanwhile and sync after you reconnect.
 
 ### What's in the folder
 
@@ -196,7 +197,7 @@ Renaming a piece renames its folder. Deleting a piece moves its folder to Drive'
 
 ### Custom fields and filters
 
-Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the cloud icon). They appear on every piece's edit form and details, and in `piece.json` by name:
+Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
 "customFields": { "Kiln": "Big kiln", "Weight (g)": 340, "Gift": true }

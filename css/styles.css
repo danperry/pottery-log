@@ -271,7 +271,8 @@ fieldset.field > legend { margin-bottom: 6px; }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 #backupNavBtn { position: relative; }
 #backupNavBtn.dirty::after { content: ""; position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: #f6d36b; box-shadow: 0 0 0 2px var(--accent); }
-#backupNavBtn.syncing svg { animation: pulse 1s ease-in-out infinite; }
+#backupNavBtn.syncing svg { animation: spin 2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { #backupNavBtn.syncing svg { animation: none; opacity: .6; } }
 .folder-box { margin: 14px 0 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 10px; }
@@ -352,3 +353,8 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .custom-fields .yesno { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .field .yesno input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }
 .custom-fields .yesno b { font-weight: 500; }
+
+/* "Google Drive got disconnected" bar under the top bar */
+.conn-bar { position: sticky; top: calc(var(--topbar-h) + env(safe-area-inset-top)); z-index: 9; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f6d36b; color: #3a2a10; font-size: .92rem; }
+.conn-bar span { flex: 1; min-width: 0; }
+.conn-bar .btn { flex: none; background: #3a2a10; color: #fff; border: 0; }
