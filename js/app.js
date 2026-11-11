@@ -681,9 +681,20 @@
       Drive.signIn();
     });
 
-    // Check the saved folder still exists.
+    // Check the saved folder still exists, and offer Pottery Log folders already in Drive
+    // (works without the picker, e.g. on a new device or in browsers that block it).
     if (Drive.configured && Drive.isSignedIn()) {
       Drive.resolveFolder().then(draw).catch((err) => { if (err.reconnect) draw(); });
+      Drive.findLibraries().then((libs) => {
+        const cur = Drive.getFolder();
+        const others = libs.filter((f) => !cur || f.id !== cur.id);
+        if (!others.length || !$('#foundFolders')) return;
+        $('#foundFolderBtns').replaceChildren(...others.map((f) => el('button', {
+          class: 'btn btn-secondary btn-small', type: 'button',
+          onclick: () => { Drive.useFolder(f); $('#foundFolders').hidden = true; draw(); afterFolderChange(f.name, 'Syncing with'); },
+        }, f.name)));
+        $('#foundFolders').hidden = false;
+      }).catch(() => {});
     }
 
     async function afterFolderChange(name, verb) {
@@ -695,8 +706,10 @@
 
     $('#pickFolderBtn').addEventListener('click', async () => {
       try {
+        $('#pickerHint').hidden = true;
         const f = await Drive.pickFolder();
         if (f) afterFolderChange(f.name, 'Syncing with');
+        else $('#pickerHint').hidden = false; // closed without picking: maybe the picker failed
       } catch (err) {
         draw();
         toast(err.message, 4000);
