@@ -215,7 +215,7 @@ Pieces saved by older versions have a single `"clayBody"`; the app reads it as a
 
 ### Custom fields and filters
 
-Every log starts with three custom fields: **Line** (text), **Price** (number) and **Purpose** (text, starting with Keep, Give and Sell). They're added once, so if you remove one it stays removed on all your devices.
+Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Line** (text), **Price** (number) and **Sold** (yes / no, No unless ticked). They're added once, so if you remove one it stays removed on all your devices. Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
 
 Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 

@@ -9,7 +9,7 @@
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
  *     clays: [{ name: 'B-Mix' }, …],              remembered clay bodies (cones are on the bisque and glaze firing)
- *     defaultsAdded: true,                        the starter fields were offered once
+ *     defaultsAdded: true, defaultsVersion: 2,    which starter fields were offered (each set once)
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
@@ -34,11 +34,14 @@
   ];
 
   // Fields every log starts with (added once; they can be edited or removed like any other).
+  // Version 2 added Sold and put them in this order.
   const DEFAULT_FIELDS = [
+    { id: 'cf-purpose', name: 'Purpose', type: 'text', remember: true, values: ['Keep', 'Give', 'Sell'] },
     { id: 'cf-line', name: 'Line', type: 'text', remember: true, values: [] },
     { id: 'cf-price', name: 'Price', type: 'number' },
-    { id: 'cf-purpose', name: 'Purpose', type: 'text', remember: true, values: ['Keep', 'Give', 'Sell'] },
+    { id: 'cf-sold', name: 'Sold', type: 'yesno' },
   ];
+  const DEFAULTS_VERSION = 2;
 
   const cleanList = (list, max = 120) => {
     const seen = new Set();
@@ -83,7 +86,8 @@
       .map((c) => (typeof c === 'string' ? { name: c } : c || {}))
       .map((c) => ({ name: String(c.name || '').trim().slice(0, 120) })) // older lists had a cone per clay: dropped
       .filter((c) => uniqueBy(c.name));
-    return { fields, filters: [...new Set(filters)], glazes, clays, defaultsAdded: !!s.defaultsAdded, updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
+    return { fields, filters: [...new Set(filters)], glazes, clays, defaultsAdded: !!s.defaultsAdded,
+      defaultsVersion: Number(s.defaultsVersion) || (s.defaultsAdded ? 1 : 0), updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
 
   function write(s) {
@@ -96,7 +100,8 @@
   function namedValues(custom) {
     const out = {};
     for (const f of load().fields) {
-      const v = custom ? custom[f.id] : undefined;
+      let v = custom ? custom[f.id] : undefined;
+      if (f.type === 'yesno') v = v === true; // yes/no fields default to No
       if (v === undefined || v === null || v === '') continue;
       out[f.name] = v;
     }
@@ -212,16 +217,31 @@
       const s = load();
       let fields = s.fields;
       const needsRemember = fields.some((f) => f.type === 'text' && f.remember === undefined);
-      if (s.defaultsAdded && !needsRemember) return false;
+      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember) return false;
       fields = fields.map((f) => (f.type === 'text' && f.remember === undefined
         ? { ...f, remember: true, values: cleanList([...(f.values || []), ...valuesFor(f.id)], 200) } : f));
-      if (!s.defaultsAdded) {
+      if (s.defaultsVersion < DEFAULTS_VERSION) {
         const names = new Set(fields.map((f) => f.name.toLowerCase()));
         const ids = new Set(fields.map((f) => f.id));
-        fields = [...fields, ...DEFAULT_FIELDS.filter((d) => !names.has(d.name.toLowerCase()) && !ids.has(d.id))];
+        // Version 1 offered Purpose, Line and Price; ones removed since then stay removed.
+        const offer = s.defaultsVersion >= 1 ? DEFAULT_FIELDS.filter((d) => d.id === 'cf-sold') : DEFAULT_FIELDS;
+        fields = [...fields, ...offer.filter((d) => !names.has(d.name.toLowerCase()) && !ids.has(d.id))];
+        // Starter fields first, in the order Purpose, Line, Price, Sold; the rest keep their order.
+        const rank = (f) => { const i = DEFAULT_FIELDS.findIndex((d) => d.id === f.id); return i < 0 ? DEFAULT_FIELDS.length : i; };
+        fields = fields.map((f, i) => [f, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([f]) => f);
       }
-      const next = { ...s, fields, defaultsAdded: true };
+      const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
       if (quiet) write(normalize(next)); else this.update(next);
+      return true;
+    },
+
+    /** Put the fields in this order (ids); any not listed keep their place at the end. */
+    reorderFields(ids) {
+      const s = load();
+      const byId = new Map(s.fields.map((f) => [f.id, f]));
+      const fields = [...ids.map((id) => byId.get(id)).filter(Boolean), ...s.fields.filter((f) => !ids.includes(f.id))];
+      if (fields.every((f, i) => f === s.fields[i])) return false;
+      this.update({ fields });
       return true;
     },
 
@@ -232,8 +252,8 @@
 
     /** Display text for a value. */
     format(f, v) {
+      if (f.type === 'yesno') return v === true ? 'Yes' : 'No'; // unset means No
       if (v === undefined || v === null || v === '') return '';
-      if (f.type === 'yesno') return v ? 'Yes' : 'No';
       return String(v);
     },
 
@@ -269,7 +289,7 @@
     /** What goes into the index (no local bookkeeping). */
     forDrive() {
       const s = load();
-      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, defaultsAdded: s.defaultsAdded, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
+      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, defaultsAdded: s.defaultsAdded, defaultsVersion: s.defaultsVersion, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
     },
     isDirty(rootId) { const s = load(); return !!s.updatedAt && (!s.sync || s.sync.root !== rootId || s.sync.syncedAt !== s.updatedAt); },
     markSynced(rootId, at) { const s = load(); write({ ...s, sync: { root: rootId, syncedAt: at } }); },
