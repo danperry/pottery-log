@@ -1,6 +1,6 @@
 # Pottery Log
 
-A small, mobile-friendly web app for logging pottery pieces: title, photos, clay body, forming method (wheel or hand-built), glazes, firing type and cone, stage (greenware → bisque → glazed → done), dates and notes.
+A small, mobile-friendly web app for logging pottery pieces: title, photos, clay bodies (one or several), forming method (wheel or hand-built), glazes, firing type and cone, stage (greenware → bisque → glazed → done), dates and notes.
 
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework. 
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
@@ -16,7 +16,7 @@ css/styles.css           Styles (light and dark)
 js/config.js             Worker URL, Google client ID and API key go here
 js/db.js                 IndexedDB storage (pieces, photos, encrypted sign-in)
 js/drive.js              Google sign-in (via the Worker) and Drive API calls
-js/settings.js           Custom fields and filter choices (synced in the index)
+js/settings.js           Custom fields, filter choices and the glaze and clay lists (synced in the index)
 js/sync.js               Two-way sync with the Drive folder (one folder per piece)
 js/app.js                Views, routing, photo handling, sync triggers
 sw.js                    Service worker (offline app shell)
@@ -180,7 +180,7 @@ Pottery Log/
 {
   "title": "Speckled mug",
   "stage": "Glazed",
-  "clayBody": "B-Mix",
+  "clays": ["B-Mix", "Porcelain"],
   "formingMethod": "Wheel",
   "glazes": ["Celadon"],
   "firing": { "type": "Electric", "cone": "6" },
@@ -194,6 +194,20 @@ Pottery Log/
 ```
 
 Renaming a piece renames its folder. Deleting a piece moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
+
+### Glazes and clays
+
+Glazes and clay bodies are picked from drop-downs on the edit form. Choose **+ New glaze…** or **+ New clay body…** to type one that isn't in the list yet; it's remembered when you save the piece. A piece can have several glazes and several clay bodies.
+
+Each clay body in the list has its own cone (for example, B-Mix at cone 6), chosen from a drop-down when you add it. This is separate from the piece's firing cone. Edit both lists under **Settings → Glazes and clays**: add or remove names and change a clay's cone. Removing a name only takes it out of the drop-down; pieces that use it keep it, and it stays out of the list when you edit those pieces.
+
+The first time the app opens after this update, it fills the lists from the glazes and clays your pieces already use. The lists are stored in `pottery-log-index.json` under `"settings"` and sync like custom fields (latest save wins):
+
+```json
+"settings": { "glazes": ["Celadon", "Shino"], "clays": [{ "name": "B-Mix", "cone": "6" }], … }
+```
+
+Pieces saved by older versions have a single `"clayBody"`; the app reads it as a one-item `"clays"` list and writes `"clays"` the next time the piece is saved.
 
 ### Custom fields and filters
 

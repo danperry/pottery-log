@@ -41,11 +41,14 @@
   };
   const str = (v) => (v == null ? '' : String(v));
 
+  /** Clay bodies of a piece (older records had one clayBody string). */
+  const claysOf = (p) => (Array.isArray(p.clays) ? p.clays : p.clayBody ? [p.clayBody] : []);
+
   function describe(p) {
     return {
       title: p.title || 'Untitled',
       stage: STAGES[p.stage] || 'Greenware',
-      clayBody: p.clayBody || '',
+      clays: claysOf(p),
       formingMethod: METHODS[p.method] || '',
       glazes: p.glazes || [],
       firing: { type: p.firingType || '', cone: p.cone || '' },
@@ -80,7 +83,7 @@
       id: str(j.id),
       title: str(j.title).trim() || 'Untitled',
       stage: fromLabel(STAGES, j.stage) || 'greenware',
-      clayBody: str(j.clayBody),
+      clays: Array.isArray(j.clays) ? j.clays.map(str).filter(Boolean) : (str(j.clayBody) ? [str(j.clayBody)] : []),
       method: fromLabel(METHODS, j.formingMethod),
       glazes: Array.isArray(j.glazes) ? j.glazes.map(str).filter(Boolean) : [],
       firingType: str(f.type),
