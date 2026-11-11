@@ -203,10 +203,19 @@
     return (await res.json()).id;
   }
 
-  async function updateFileContent(fileId, blob) {
-    await api(UPLOAD + '/files/' + encodeURIComponent(fileId) + '?uploadType=media&fields=id&' + ALL_DRIVES, {
-      method: 'PATCH', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob,
+  /** Replace a file's content and (optionally) its metadata in one request. */
+  async function updateFile(fileId, metadata, blob) {
+    const { body, contentType } = multipartBody(metadata || {}, blob);
+    await api(UPLOAD + '/files/' + encodeURIComponent(fileId) + '?uploadType=multipart&fields=id&' + ALL_DRIVES, {
+      method: 'PATCH', headers: { 'Content-Type': contentType }, body,
     });
+  }
+
+  async function patchMeta(fileId, metadata) {
+    const res = await api('/files/' + encodeURIComponent(fileId) + '?fields=id,name,trashed&' + ALL_DRIVES, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(metadata),
+    });
+    return res.json();
   }
 
   const Drive = {
@@ -393,19 +402,37 @@
       return res.json();
     },
 
-    async writeData(folderId, existingFileId, data) {
-      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-      if (existingFileId) {
-        await updateFileContent(existingFileId, blob);
-        return existingFileId;
+    /* ---- general helpers used by sync.js ---- */
+
+    /** files.list with paging; query uses Drive's search syntax. */
+    list: listFiles,
+    quote: q,
+    create: createFile,
+    update: updateFile,
+    patch: patchMeta,
+
+    /** Metadata for one file, or null if it doesn't exist or we lost access. */
+    async getMeta(fileId, fields) {
+      try {
+        const res = await api('/files/' + encodeURIComponent(fileId) + '?fields=' + encodeURIComponent(fields) + '&' + ALL_DRIVES);
+        return await res.json();
+      } catch (err) {
+        if (err.status === 404 || err.status === 403) return null;
+        throw err;
       }
-      return createFile({
-        name: 'pottery-log.json',
-        parents: [folderId],
-        mimeType: 'application/json',
-        appProperties: { potteryLog: 'data' },
-      }, blob);
     },
+
+    async mkdir(name, parentId, appProperties) {
+      const res = await api('/files?fields=id,name&' + ALL_DRIVES, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId], appProperties }),
+      });
+      return (await res.json()).id;
+    },
+
+    /** Move to Drive's trash (recoverable for 30 days), not a permanent delete. */
+    trash: (fileId) => patchMeta(fileId, { trashed: true }),
 
     async deleteFile(fileId) {
       await api('/files/' + encodeURIComponent(fileId) + '?' + ALL_DRIVES, { method: 'DELETE' });

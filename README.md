@@ -4,7 +4,7 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework.
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
-- **Optional backup to your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive. You sign in once and stay connected, thanks to a tiny sign-in Worker on Cloudflare's free tier (`worker/`).
+- **Optional sync with your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive. You sign in once and stay connected, thanks to a tiny sign-in Worker on Cloudflare's free tier (`worker/`).
 - **Installable** on Android (and desktop Chrome) through the web app manifest, and it opens offline thanks to a small service worker.
 
 ## Files
@@ -16,7 +16,8 @@ css/styles.css           Styles (light and dark)
 js/config.js             Worker URL, Google client ID and API key go here
 js/db.js                 IndexedDB storage (pieces, photos, encrypted sign-in)
 js/drive.js              Google sign-in (via the Worker) and Drive API calls
-js/app.js                Views, routing, photo handling, backup/restore
+js/sync.js               Two-way sync with the Drive folder (one folder per piece)
+js/app.js                Views, routing, photo handling, sync triggers
 sw.js                    Service worker (offline app shell)
 worker/src/index.js      Cloudflare Worker that keeps you signed in (see "Sign-in Worker")
 worker/wrangler.toml     Worker settings: name and APP_URL (secrets are set separately)
@@ -142,26 +143,73 @@ Keep `TOKEN_ENC_KEY` the same from then on. Changing it makes every saved sign-i
 
 To try the Worker locally, put the three secrets in `worker/.dev.vars` (one `NAME=value` per line, git-ignored). Set `APP_URL = "http://localhost:8000/"`, run `npx wrangler dev` (it serves on port 8787), and point `authWorkerUrl` at `http://localhost:8787`.
 
-## Using backup and restore
+## Syncing with Google Drive
 
 Tap the cloud icon in the top bar.
 
 - **Sign in with Google** takes you to Google's consent screen and back. Grant access to "the specific Google Drive files you use with this app". You stay signed in from then on.
-- **Backup folder** shows where backups go. Set it before your first backup:
+- **Drive folder** is where your pieces go. Set it once on each device:
   - **Choose folder** opens Google's folder picker. Pick any folder in My Drive or a shared drive. Picking it gives the app access to that one folder, and nothing else in your Drive.
   - **New folder** creates a folder with the name you type (default `Pottery Log`) at the top of My Drive.
-- **Back up now** writes `pottery-log.json` (all piece details) and one JPEG per photo into the backup folder. Later backups upload only new photos, rewrite the JSON, and remove photos of deleted pieces. The app only ever touches files it created, so other files you keep in that folder are left alone. A backup is a snapshot of this device: if the folder holds a newer backup from a different device, the app warns you before overwriting it.
-- **Back up automatically whenever I save** is offered next to the sign-in button, and you can switch it on or off later. When it's on, every save, stage change or delete backs up in the background. The cloud icon pulses while that runs and shows a yellow dot when there are changes not yet in Drive. If an automatic backup can't run (offline, or no folder chosen), the dot stays until the next save, the next app launch with a connection, or a manual **Back up now**. Automatic backup never overwrites a newer backup from another device. It stops and asks you to decide on the Backup screen.
-- **Restore from Drive** replaces the pieces on this device with the backup in the chosen folder, downloading any photos that aren't already here.
+- **Sync now** brings this device and the folder up to date with each other. The app also syncs by itself whenever it opens, when you come back to it after a minute or more, and when the connection returns.
+- **Sync automatically whenever I save** (offered next to the sign-in button, and switchable later) also syncs after every save, stage change or delete. The cloud icon pulses while it runs and shows a dot when there are changes not yet in Drive.
 
-If you change the backup folder, the next backup copies everything into the new folder. The old folder is left as it was.
+### What's in the folder
 
-To move to a new phone: back up on the old one. Then install the app on the new one, sign in, use **Choose folder** to pick the same folder, and restore.
+Everything is meant to be readable in Drive without the app:
+
+```
+Pottery Log/
+  pottery-log-index.json     every piece in one list (title, stage, clay, glazes, dates, savedAt…)
+  Speckled mug/              one folder per piece, named after its title
+    piece.json               all its details, including notes, pretty-printed
+    photo-1.jpg              its photos, in order
+    photo-2.jpg
+  Celadon bowl/
+    …
+```
+
+`piece.json` looks like this:
+
+```json
+{
+  "title": "Speckled mug",
+  "stage": "Glazed",
+  "clayBody": "B-Mix",
+  "formingMethod": "Wheel",
+  "glazes": ["Celadon"],
+  "firing": { "type": "Electric", "cone": "6" },
+  "dates": { "made": "2026-11-02", "bisqueFired": "2026-11-08", "glazeFired": "2026-11-11", "finished": "" },
+  "notes": "Thin rim, two coats.",
+  "photos": ["photo-1.jpg", "photo-2.jpg"],
+  "savedAt": "2026-11-11T15:04:05.000Z",
+  "createdAt": "2026-11-02T18:00:00.000Z",
+  "id": "…"
+}
+```
+
+Renaming a piece renames its folder. Deleting a piece moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
+
+### Conflicts: the latest save wins
+
+Every save records when it happened (`savedAt`). If the same piece was changed on two devices before they synced, the version saved most recently is kept, as a whole piece, and the other device picks it up at its next sync. This relies on the devices' clocks being roughly right, which phones keep automatically.
+
+### Fast opening: pieces load on demand
+
+On open, the app reads only the index, so even a long log appears quickly. Pieces that came from another device show their summary (title, stage, clay, glazes, dates and cover photo) straight away. Their notes and other photos download the first time you open the piece, and are kept on the device after that. Offline, an unopened piece shows its summary and says the rest will load when you're back online.
+
+### Moving devices and changing folders
+
+To set up a new phone: install the app, sign in and use **Choose folder** to pick the same folder. Your pieces appear and fill in as you open them.
+
+If you change to a different folder, the next sync copies every piece into it. The old folder is left as it was.
+
+Backups made by earlier versions of the app (a single `pottery-log.json` plus loose photos) are converted automatically the first time you sync with that folder. The pieces are moved into the new layout and the old files go to Drive's trash.
 
 The app stays connected until you tap **Disconnect**, across restarts and without asking again. Before each Drive call it gets a fresh access token from the Worker if it has none, or if the one it has expires within 5 minutes.
 
-- **Reconnect Google Drive:** Google ends a sign-in when you remove the app's access in your Google account, or when it goes unused for 6 months. It also ends after 7 days while the consent screen is still in Testing. When that happens, the app forgets the saved sign-in and shows a single **Reconnect Google Drive** button. Everything on the device stays, and you can keep logging pieces. Changes made meanwhile are backed up after you reconnect.
-- **Disconnect** revokes the app's access with Google and deletes the saved sign-in from this device. Your backups in Drive and your pieces on the device are kept. If Google can't be reached at that moment, the app says so; you can also remove access at <https://myaccount.google.com/connections>.
+- **Reconnect Google Drive:** Google ends a sign-in when you remove the app's access in your Google account, or when it goes unused for 6 months. It also ends after 7 days while the consent screen is still in Testing. When that happens, the app forgets the saved sign-in and shows a single **Reconnect Google Drive** button. Everything on the device stays, and you can keep logging pieces. Changes made meanwhile sync after you reconnect.
+- **Disconnect** revokes the app's access with Google and deletes the saved sign-in from this device. Your files in Drive and your pieces on the device are kept. Pieces that came from Drive but were never opened on this device keep only their summary until you reconnect. If Google can't be reached at that moment, the app says so; you can also remove access at <https://myaccount.google.com/connections>.
 
 ## Adding to an Android home screen
 
@@ -183,6 +231,6 @@ When you change any file, bump `VERSION` in `sw.js` so installed copies refresh 
 
 ## Privacy
 
-Pieces and photos stay in your browser's storage on your device, and in your own Google Drive if you back up. The app never sees the rest of your Drive. The only server is the sign-in Worker. It handles your Google refresh token just long enough to get access tokens, never sees your pieces or files, and stores nothing.
+Pieces and photos stay in your browser's storage on your device, and in your own Google Drive if you connect it. The app never sees the rest of your Drive. The only server is the sign-in Worker. It handles your Google refresh token just long enough to get access tokens, never sees your pieces or files, and stores nothing.
 
 The full policy is in [`privacy.html`](privacy.html), served at `https://<your-username>.github.io/pottery-log/privacy.html`. Use that URL as the **Privacy policy link** on the OAuth consent screen (Google Auth Platform → **Branding**). The home page link is `https://<your-username>.github.io/pottery-log/`.
