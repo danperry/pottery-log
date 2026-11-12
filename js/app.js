@@ -986,8 +986,12 @@
   // Docs: https://developer.squareup.com/docs/pos-api/web-technical-reference
   const SQUARE_PENDING_KEY = 'potteryLog.squarePending';
   const squareAppId = () => Settings.square().appId || (window.POTTERY_CONFIG || {}).squareAppId || '';
-  const squareCallbackUrl = () => location.origin + location.pathname;
-  const pieceUrl = (id) => squareCallbackUrl() + '#/piece/' + encodeURIComponent(id);
+  const appUrl = () => location.origin + location.pathname;
+  const pieceUrl = (id) => appUrl() + '#/piece/' + encodeURIComponent(id);
+  // With the sign-in Worker set up, Square returns through it: the Worker keeps the result for
+  // the home-screen app (on iPhone, Square comes back in Safari, which can't see its pieces).
+  const relayUrl = () => ((window.POTTERY_CONFIG || {}).authWorkerUrl || '').trim().replace(/\/+$/, '');
+  const squareCallbackUrl = () => (relayUrl() ? relayUrl() + '/square/return' : appUrl());
   const isAndroid = () => /Android/i.test(navigator.userAgent);
   const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
   const squareSaleUrl = (id) => 'https://app.squareup.com/dashboard/sales/transactions/' + encodeURIComponent(id);
@@ -1025,8 +1029,9 @@
     if (!isAndroid() && !isIOS()) { toast('Square checkout opens the Square Point of Sale app, so use it on your phone or tablet.', 4500); return; }
     const total = Math.round(amount * 10 ** Settings.minorDigits(price.currency));
     const note = ('Pottery Log: ' + (p.title || 'Untitled')).slice(0, 200) + ' ' + pieceUrl(p.id);
-    const state = 'pl:' + p.id;
-    store(SQUARE_PENDING_KEY, { pieceId: p.id, at: Date.now() });
+    const key = relayUrl() ? Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b & 63]).join('') : '';
+    const state = 'pl:' + p.id + (key ? ':' + key : '');
+    store(SQUARE_PENDING_KEY, { pieceId: p.id, key, at: Date.now() });
     if (isAndroid()) {
       const extra = (k, v) => k + '=' + encodeURIComponent(v) + ';';
       location.href = 'intent:#Intent;action=com.squareup.pos.action.CHARGE;package=com.squareup;' +
@@ -1076,7 +1081,8 @@
     if (!r) return null;
     const pending = store(SQUARE_PENDING_KEY);
     store(SQUARE_PENDING_KEY, null);
-    r.pieceId = r.state && r.state.startsWith('pl:') ? r.state.slice(3) : pending && pending.pieceId;
+    const m = typeof r.state === 'string' && r.state.match(/^pl:([^:]+)/);
+    r.pieceId = m ? m[1] : pending && pending.pieceId;
     if (r.error) r.error = r.error.replace(/^com\.squareup\.pos\.ERROR_/, '');
     history.replaceState(null, '', location.pathname + (r.pieceId ? '#/piece/' + encodeURIComponent(r.pieceId) : '#/'));
     return r;
@@ -1094,7 +1100,9 @@
     if (!p || p.deleted || p.stub) {
       // E.g. Square opened the browser instead of the home-screen app, which keeps its own pieces.
       const box = el('div', { class: 'square-note', role: 'status' },
-        el('p', null, 'The sale went through in Square, but this piece isn\'t in this copy of Pottery Log (Square may have opened your browser instead of the home-screen app). Copy the link, then open the piece in Pottery Log, tap Edit and paste it into Transaction.'),
+        el('p', null, relayUrl()
+          ? 'The sale went through in Square. Square opened your browser, so switch back to Pottery Log on your home screen: it marks the piece sold there. If it doesn\'t, copy this link into the piece\'s Transaction field.'
+          : 'The sale went through in Square, but this piece isn\'t in this copy of Pottery Log (Square may have opened your browser instead of the home-screen app). Copy the link, then open the piece in Pottery Log, tap Edit and paste it into Transaction.'),
         el('div', { class: 'folder-actions' },
           el('button', { type: 'button', class: 'btn btn-primary btn-small', onclick: () => {
             (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => toast('Link copied'), () => toast(url, 8000));
@@ -1115,6 +1123,28 @@
     toast(r.serverId ? 'Sold! The Square transaction is saved on this piece.' : 'Sold! Square was offline, so the transaction link will open your Square sales list.', 4000);
     if (location.hash === '#/piece/' + encodeURIComponent(p.id)) route();
   }
+
+  /** A sale started here whose result went to the Worker (e.g. Square came back in Safari):
+   * fetch it and save it. Runs on open and whenever the app comes back to the screen. */
+  let relayBusy = false;
+  async function checkSquareRelay() {
+    const pending = store(SQUARE_PENDING_KEY);
+    if (!pending || !pending.key || !relayUrl() || relayBusy) return;
+    if (Date.now() - pending.at > 24 * 3600 * 1000) { store(SQUARE_PENDING_KEY, null); return; } // the Worker forgets after a day
+    relayBusy = true;
+    try {
+      const res = await fetch(relayUrl() + '/square/result', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: pending.key }),
+      });
+      if (res.status === 404) return; // still in Square, or not finished yet
+      if (!res.ok) return;
+      const r = await res.json();
+      store(SQUARE_PENDING_KEY, null);
+      await saveSquareSale({ ...r, pieceId: r.pieceId || pending.pieceId });
+    } catch (e) { /* offline: try again next time */ } finally { relayBusy = false; }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSquareRelay(); });
+  window.addEventListener('pageshow', (e) => { if (e.persisted) checkSquareRelay(); });
 
   /** The Square panel in Settings. */
   function drawSquareSettings(onFieldsChange) {
@@ -1686,6 +1716,7 @@
     window.addEventListener('hashchange', route);
     route();
     if (squareReturn) saveSquareSale(squareReturn).catch((e) => toast(e.message || 'Could not save the Square sale.', 5000));
+    else checkSquareRelay();
 
     Sync.init({ makeThumb });
     PhotoCache.init({

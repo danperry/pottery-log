@@ -10,6 +10,12 @@ workers_dev = true
 # only accept requests from this URL's origin.
 APP_URL = "https://danperry.github.io/pottery-log/"
 
+# Square sale results waiting for the home-screen app (see "Square relay" in src/index.js).
+# Create it once with `npx wrangler kv namespace create SQUARE_RELAY` and put its id here.
+[[kv_namespaces]]
+binding = "SQUARE_RELAY"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
 # Secrets are NOT set here. Set them once with:
 #   npx wrangler secret put GOOGLE_CLIENT_ID
 #   npx wrangler secret put GOOGLE_CLIENT_SECRET

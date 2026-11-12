@@ -107,7 +107,7 @@ Changes in Google Cloud can take a few minutes to take effect. If you see `Error
 
 ## Sign-in Worker
 
-Browser-only Google sign-in can't keep you signed in: it only hands out access tokens that last an hour, and getting a long-lived *refresh token* needs the OAuth client secret, which can't live in a public web page. `worker/` is a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) that holds the secret and does just that part. It stores nothing.
+Browser-only Google sign-in can't keep you signed in: it only hands out access tokens that last an hour, and getting a long-lived *refresh token* needs the OAuth client secret, which can't live in a public web page. `worker/` is a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) that holds the secret and does just that part. Apart from Square sale results waiting for the app (kept for a day at most), it stores nothing.
 
 | Endpoint | What it does |
 | --- | --- |
@@ -115,6 +115,8 @@ Browser-only Google sign-in can't keep you signed in: it only hands out access t
 | `GET /auth/callback` | Exchanges Google's code for tokens using the client secret, encrypts the refresh token with AES-GCM (key `TOKEN_ENC_KEY`), and redirects back to the app with the encrypted blob in the URL fragment. The fragment isn't sent to GitHub's servers, and the app removes it from the address bar and history straight away. |
 | `POST /auth/token` | Takes `{ blob }`, decrypts it, asks Google for a fresh access token, and returns only `{ access_token, expires_in, expires_at }`. Returns `401 {"error":"invalid_grant"}` when the sign-in is no longer valid. |
 | `POST /auth/revoke` | Takes `{ blob }` and revokes the refresh token with Google. Used by **Disconnect**. |
+| `GET /square/return` | Square's callback after a sale (see [Selling with Square](#selling-with-square)). Keeps the result (transaction IDs and piece ID only) in the `SQUARE_RELAY` KV namespace for a day, under a random key the app put in the sale, then redirects to the app with Square's parameters. |
+| `POST /square/result` | Takes `{ key }` and returns that sale's result once (then deletes it), or 404 if it hasn't arrived. App origin only. |
 
 `/auth/token` and `/auth/revoke` only answer requests from the app's origin (`APP_URL`), and send CORS headers for that origin only. The app keeps the encrypted blob in IndexedDB, and the access token in memory only. Neither is ever put in `localStorage`. The blob is useless without `TOKEN_ENC_KEY`.
 
@@ -136,6 +138,13 @@ npx wrangler secret put GOOGLE_CLIENT_ID       # the OAuth client ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET   # the OAuth client secret
 openssl rand -base64 32                        # make a key, then paste it into:
 npx wrangler secret put TOKEN_ENC_KEY
+```
+
+For Square checkout, create the KV namespace once and put the id it prints into `wrangler.toml` (`[[kv_namespaces]]`, binding `SQUARE_RELAY`), then deploy again:
+
+```sh
+npx wrangler kv namespace create SQUARE_RELAY
+npx wrangler deploy
 ```
 
 Finally:
@@ -247,10 +256,10 @@ One-time setup (free):
 
 1. Sign in at [developer.squareup.com/apps](https://developer.squareup.com/apps) with your Square account and create an application.
 2. Copy its **Production Application ID** (starts with `sq0idp-`) into **Settings → Square** (or set `squareAppId` in `js/config.js`). It isn't a secret.
-3. In the application, open **Point of Sale API** and under **Web** add the callback URL shown in Settings, e.g. `https://danperry.github.io/pottery-log/`. Save.
+3. In the application, open **Point of Sale API** and under **Web** add the callback URL shown in Settings. With the sign-in Worker set up it's the Worker's `/square/return`, e.g. `https://pottery-log-auth.danperry.workers.dev/square/return` (without one, it's the app's own address). Save.
 4. Install the Square Point of Sale app on the phone and sign in.
 
-The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app; if the piece isn't found there, a note offers the transaction link to copy and paste into **Transaction**. On Android, an installed app usually opens directly. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
+The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app. That's why the callback goes through the Worker: it keeps the result, and when you switch back to Pottery Log on your home screen, the app fetches it and marks the piece sold. Safari shows a short note saying so, with the transaction link as a fallback. On Android, Chrome and the installed app share their pieces, so the sale is saved straight away. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
 
 ### Conflicts: the latest save wins
 
