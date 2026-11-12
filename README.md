@@ -221,9 +221,9 @@ Pieces saved by older versions have a single `"clayBody"`; the app reads it as a
 
 ### Custom fields and filters
 
-Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Line** (text), **Price** (number) and **Sold** (yes / no, No unless ticked). They're added once, so if you remove one it stays removed on all your devices. Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
+Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Line** (text), **Price** (currency) and **Sold** (yes / no, No unless ticked). With **Integrate with Square** on (the default), there's also **Transaction** (a link); see [Selling with Square](#selling-with-square). They're added once, so if you remove one it stays removed on all your devices. Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
 
-Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
+Add your own fields (Text, Number, Currency, Date, Yes / no, a Choice list, or a Link) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
 "customFields": { "Line": "Speckled", "Price": 45, "Purpose": "Give" }
@@ -234,6 +234,23 @@ Each text field has its own **Remember entered values for a drop-down** setting 
 On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, bisque or glaze firing type and cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions (with remembered values) and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
 
 Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
+
+A **Currency** field has its own currency, which starts as the one for your device's region (for example GBP for en-GB) and can be changed in the field's settings. Amounts are shown in that currency and saved in `piece.json` as plain numbers. A **Link** field holds a web address (https:// is added if you leave it off) and shows as a tappable link.
+
+### Selling with Square
+
+**Settings → Square → Integrate with Square** is on by default. While it's on, every piece has **Price** (currency), **Sold** (yes / no) and **Transaction** (link). Those three can be renamed but not removed or changed to another type; turn the integration off to do that.
+
+A piece with a price that isn't sold gets a **Charge with Square** button. On an Android phone or an iPhone/iPad it opens the Square Point of Sale app with the price filled in and a note holding the piece's title and link. When the sale finishes, Square opens Pottery Log again; the piece is marked **Sold** and **Transaction** links to the sale in your Square Dashboard. A cancelled sale changes nothing.
+
+One-time setup (free):
+
+1. Sign in at [developer.squareup.com/apps](https://developer.squareup.com/apps) with your Square account and create an application.
+2. Copy its **Production Application ID** (starts with `sq0idp-`) into **Settings → Square** (or set `squareAppId` in `js/config.js`). It isn't a secret.
+3. In the application, open **Point of Sale API** and under **Web** add the callback URL shown in Settings, e.g. `https://danperry.github.io/pottery-log/`. Save.
+4. Install the Square Point of Sale app on the phone and sign in.
+
+The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app; if the piece isn't found there, a note offers the transaction link to copy and paste into **Transaction**. On Android, an installed app usually opens directly. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
 
 ### Conflicts: the latest save wins
 

@@ -468,6 +468,7 @@
     const f = def.builtin ? null : def;
     if (def.id === 'bisqueCone' || def.id === 'glazeCone') return values.sort((a, b) => CONES.indexOf(a.slice(5)) - CONES.indexOf(b.slice(5)));
     if (f && f.type === 'number') return values.sort((a, b) => Number(a) - Number(b));
+    if (f && f.type === 'currency') return values.sort((a, b) => Settings.amountOf(a) - Settings.amountOf(b));
     if (f && f.type === 'date') return values.sort().reverse();
     if (f && f.type === 'choice') return values.sort((a, b) => (f.options.indexOf(a) + 1 || 999) - (f.options.indexOf(b) + 1 || 999) || a.localeCompare(b));
     return values.sort((a, b) => a.localeCompare(b));
@@ -576,7 +577,7 @@
         el('input', { type: 'checkbox', value: d.id, checked: chosen.has(d.id) }),
         el('span', null, d.name),
         d.builtin ? null : el('span', { class: 'type' }, Settings.TYPES[d.type]));
-      const custom = Settings.fields();
+      const custom = Settings.fields().filter((f) => f.type !== 'link'); // a link per piece isn't something to filter by
       $('#filterChoices').replaceChildren(
         el('h3', null, 'Pottery details'), ...Settings.BUILTIN_FILTERS.map((b) => row({ ...b, builtin: true })),
         custom.length ? el('h3', null, 'Your fields') : '', ...custom.map(row));
@@ -741,8 +742,10 @@
     add('Finished', fmtDate(p.dateDone));
     for (const f of Settings.fields()) {
       const v = (p.custom || {})[f.id];
+      if (f.type === 'link') { if (v) add(f.name, linkTo(v)); continue; }
       add(f.name, f.type === 'date' ? fmtDate(v) : Settings.format(f, v));
     }
+    drawSquareCharge(p);
     const factsEl = $('#dFacts');
     if (facts.length) factsEl.replaceChildren(...facts); else factsEl.hidden = true;
 
@@ -859,6 +862,13 @@
         const seen = [...new Set(all.map((p) => (p.custom || {})[cf.id]).filter((x) => typeof x === 'string' && x))].sort();
         return el('label', { class: 'field' }, el('span', null, cf.name), input,
           el('datalist', { id: listId }, seen.map((x) => el('option', { value: x }))));
+      } else if (cf.type === 'currency') {
+        const digits = Settings.minorDigits(cf.currency);
+        input = el('input', { name, type: 'number', min: '0', step: digits ? String(10 ** -digits) : '1', inputmode: digits ? 'decimal' : 'numeric' });
+        if (v !== undefined && v !== null && v !== '') input.value = Number(v).toFixed(digits);
+        return el('label', { class: 'field' }, el('span', null, cf.name + ' (' + cf.currency + ')'), input);
+      } else if (cf.type === 'link') {
+        input = el('input', { name, type: 'url', inputmode: 'url', maxlength: '2000', autocomplete: 'off', placeholder: 'https://' });
       } else {
         input = el('input', { name, type: cf.type === 'number' ? 'number' : 'date', step: cf.type === 'number' ? 'any' : null, inputmode: cf.type === 'number' ? 'decimal' : null });
       }
@@ -940,6 +950,7 @@
         const input = form.elements['cf:' + cf.id];
         if (!input) continue;
         const v = cf.type === 'yesno' ? input.checked : Settings.coerce(cf, input.value.trim());
+        if (cf.type === 'link' && v === '' && input.value.trim()) { toast('“' + cf.name + '” needs a web address, such as https://…'); input.focus(); return; }
         if (v === '') delete custom[cf.id];
         else custom[cf.id] = v;
       }
@@ -965,6 +976,173 @@
     });
 
     if (isNew) f.title.focus();
+  }
+
+  /* ---------- Square checkout ---------- */
+
+  // "Charge with Square" opens the Square Point of Sale app with the piece's price and a note
+  // holding its link. When the sale is done, Square opens this page again with the transaction
+  // ID, which is saved on the piece (Transaction, and Sold set to Yes).
+  // Docs: https://developer.squareup.com/docs/pos-api/web-technical-reference
+  const SQUARE_PENDING_KEY = 'potteryLog.squarePending';
+  const squareAppId = () => Settings.square().appId || (window.POTTERY_CONFIG || {}).squareAppId || '';
+  const squareCallbackUrl = () => location.origin + location.pathname;
+  const pieceUrl = (id) => squareCallbackUrl() + '#/piece/' + encodeURIComponent(id);
+  const isAndroid = () => /Android/i.test(navigator.userAgent);
+  const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const squareSaleUrl = (id) => 'https://app.squareup.com/dashboard/sales/transactions/' + encodeURIComponent(id);
+
+  function linkTo(url) {
+    let text = url;
+    try { const u = new URL(url); text = u.host.replace(/^www\./, '') + (u.pathname.length > 1 ? u.pathname : ''); } catch (e) { /* show as is */ }
+    if (/squareup\.com\/dashboard\/sales\/transactions\/./.test(url)) text = 'View in Square';
+    return el('a', { href: url, target: '_blank', rel: 'noopener', class: 'fact-link' }, text);
+  }
+
+  function currencySelect(selected) {
+    const cur = selected || Settings.localCurrency();
+    const sel = el('select', null, Settings.currencyChoices().map((c) => el('option', { value: c.code, selected: c.code === cur }, c.label)));
+    sel.value = cur;
+    return sel;
+  }
+
+  function drawSquareCharge(p) {
+    const btn = $('#squareBtn');
+    if (!btn) return;
+    const price = Settings.squareField('price');
+    const sold = Settings.squareField('sold');
+    const custom = p.custom || {};
+    const amount = price ? Number(custom[price.id]) : NaN;
+    btn.hidden = !Settings.square().enabled || p.stub || !(amount > 0) || (sold && custom[sold.id] === true);
+    if (btn.hidden) return;
+    btn.textContent = 'Charge ' + Settings.format(price, amount) + ' with Square';
+    btn.onclick = () => startSquareCharge(p, price, amount);
+  }
+
+  function startSquareCharge(p, price, amount) {
+    const appId = squareAppId();
+    if (!appId) { toast('Add your Square application ID in Settings first.', 4000); return nav('#/backup'); }
+    if (!isAndroid() && !isIOS()) { toast('Square checkout opens the Square Point of Sale app, so use it on your phone or tablet.', 4500); return; }
+    const total = Math.round(amount * 10 ** Settings.minorDigits(price.currency));
+    const note = ('Pottery Log: ' + (p.title || 'Untitled')).slice(0, 200) + ' ' + pieceUrl(p.id);
+    const state = 'pl:' + p.id;
+    store(SQUARE_PENDING_KEY, { pieceId: p.id, at: Date.now() });
+    if (isAndroid()) {
+      const extra = (k, v) => k + '=' + encodeURIComponent(v) + ';';
+      location.href = 'intent:#Intent;action=com.squareup.pos.action.CHARGE;package=com.squareup;' +
+        extra('S.com.squareup.pos.WEB_CALLBACK_URI', squareCallbackUrl()) +
+        extra('S.com.squareup.pos.CLIENT_ID', appId) +
+        extra('S.com.squareup.pos.API_VERSION', 'v2.0') +
+        extra('i.com.squareup.pos.TOTAL_AMOUNT', String(total)) +
+        extra('S.com.squareup.pos.CURRENCY_CODE', price.currency) +
+        extra('S.com.squareup.pos.TENDER_TYPES', 'com.squareup.pos.TENDER_CARD,com.squareup.pos.TENDER_CARD_ON_FILE,com.squareup.pos.TENDER_CASH,com.squareup.pos.TENDER_OTHER') +
+        extra('S.com.squareup.pos.NOTE', note) +
+        extra('S.com.squareup.pos.REQUEST_METADATA', state) +
+        extra('S.browser_fallback_url', 'https://play.google.com/store/apps/details?id=com.squareup') +
+        'end';
+    } else {
+      const data = {
+        amount_money: { amount: total, currency_code: price.currency },
+        callback_url: squareCallbackUrl(), client_id: appId, version: '1.3', notes: note, state,
+        options: { supported_tender_types: ['CREDIT_CARD', 'CASH', 'OTHER', 'SQUARE_GIFT_CARD', 'CARD_ON_FILE'] },
+      };
+      location.href = 'square-commerce-v1://payment/create?data=' + encodeURIComponent(JSON.stringify(data));
+    }
+  }
+
+  const SQUARE_ERRORS = {
+    TRANSACTION_CANCELED: '', payment_canceled: '',
+    NO_EMPLOYEE_LOGGED_IN: 'Sign in to the Square app first.', USER_NOT_LOGGED_IN: 'Sign in to the Square app first.', not_logged_in: 'Sign in to the Square app first.',
+    UNAUTHORIZED_CLIENT_ID: 'Square didn\'t accept the application ID. Check it in Settings.', DISABLED: 'The Point of Sale API isn\'t turned on for this Square app.',
+    currency_code_mismatch: 'The price\'s currency doesn\'t match your Square account. Change it on the Price field in Settings.',
+    UNSUPPORTED_API_VERSION: 'Update the Square app and try again.', unsupported_api_version: 'Update the Square app and try again.',
+    TRANSACTION_ALREADY_IN_PROGRESS: 'Square is already in the middle of a sale.', could_not_perform: 'Square has an unfinished sale. Finish or cancel it first.',
+  };
+
+  /** Read Square's reply from the address bar (and take it out). Returns null if there isn't one. */
+  function readSquareReturn() {
+    const q = new URLSearchParams(location.search);
+    const P = 'com.squareup.pos.';
+    let r = null;
+    if (q.has(P + 'CLIENT_TRANSACTION_ID') || q.has(P + 'SERVER_TRANSACTION_ID') || q.has(P + 'ERROR_CODE')) {
+      r = { serverId: q.get(P + 'SERVER_TRANSACTION_ID'), clientId: q.get(P + 'CLIENT_TRANSACTION_ID'), state: q.get(P + 'REQUEST_METADATA'),
+        error: q.get(P + 'ERROR_CODE'), errorText: q.get(P + 'ERROR_DESCRIPTION') };
+    } else if (q.has('data')) {
+      try {
+        const d = JSON.parse(q.get('data'));
+        if (d && d.status) r = { serverId: d.transaction_id, clientId: d.client_transaction_id, state: d.state, error: d.status === 'ok' ? null : d.error_code || 'error' };
+      } catch (e) { /* not from Square */ }
+    }
+    if (!r) return null;
+    const pending = store(SQUARE_PENDING_KEY);
+    store(SQUARE_PENDING_KEY, null);
+    r.pieceId = r.state && r.state.startsWith('pl:') ? r.state.slice(3) : pending && pending.pieceId;
+    if (r.error) r.error = r.error.replace(/^com\.squareup\.pos\.ERROR_/, '');
+    history.replaceState(null, '', location.pathname + (r.pieceId ? '#/piece/' + encodeURIComponent(r.pieceId) : '#/'));
+    return r;
+  }
+
+  /** Save a finished sale on its piece: Transaction link, and Sold set to Yes. */
+  async function saveSquareSale(r) {
+    if (r.error) {
+      const msg = SQUARE_ERRORS[r.error];
+      if (msg !== '') toast(msg || 'Square: ' + (r.errorText || r.error.replace(/_/g, ' ').toLowerCase()), 5000);
+      return;
+    }
+    const url = r.serverId ? squareSaleUrl(r.serverId) : 'https://app.squareup.com/dashboard/sales/transactions';
+    const p = r.pieceId ? await DB.getPiece(r.pieceId) : null;
+    if (!p || p.deleted || p.stub) {
+      // E.g. Square opened the browser instead of the home-screen app, which keeps its own pieces.
+      const box = el('div', { class: 'square-note', role: 'status' },
+        el('p', null, 'The sale went through in Square, but this piece isn\'t in this copy of Pottery Log (Square may have opened your browser instead of the home-screen app). Copy the link, then open the piece in Pottery Log, tap Edit and paste it into Transaction.'),
+        el('div', { class: 'folder-actions' },
+          el('button', { type: 'button', class: 'btn btn-primary btn-small', onclick: () => {
+            (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => toast('Link copied'), () => toast(url, 8000));
+          } }, 'Copy link'),
+          el('a', { class: 'btn btn-ghost btn-small', href: url, target: '_blank', rel: 'noopener' }, 'Open in Square'),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => box.remove() }, 'Close')));
+      document.body.append(box);
+      return;
+    }
+    p.custom = { ...(p.custom || {}) };
+    const tx = Settings.squareField('transaction');
+    const sold = Settings.squareField('sold');
+    if (tx) p.custom[tx.id] = url;
+    if (sold) p.custom[sold.id] = true;
+    p.updatedAt = Date.now();
+    await DB.putPiece(p);
+    markChanged();
+    toast(r.serverId ? 'Sold! The Square transaction is saved on this piece.' : 'Sold! Square was offline, so the transaction link will open your Square sales list.', 4000);
+    if (location.hash === '#/piece/' + encodeURIComponent(p.id)) route();
+  }
+
+  /** The Square panel in Settings. */
+  function drawSquareSettings(onFieldsChange) {
+    const toggle = $('#squareOn');
+    if (!toggle) return;
+    const sq = Settings.square();
+    toggle.checked = sq.enabled;
+    $('#squareSetup').hidden = !sq.enabled;
+    const idInput = $('#squareAppId');
+    if (document.activeElement !== idInput) idInput.value = sq.appId || '';
+    idInput.placeholder = (window.POTTERY_CONFIG || {}).squareAppId || 'sq0idp-…';
+    $('#squareCallback').textContent = squareCallbackUrl();
+    $('#squareNoId').hidden = !!squareAppId();
+    if (toggle.dataset.wired) return;
+    toggle.dataset.wired = '1';
+    toggle.addEventListener('change', () => {
+      Settings.setSquare({ enabled: toggle.checked });
+      drawSquareSettings(onFieldsChange); onFieldsChange(); markChanged();
+      toast(toggle.checked ? 'Square is on. Price, Sold and Transaction are on every piece.' : 'Square is off. Its fields stay until you remove them.');
+    });
+    $('#squareForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const id = idInput.value.trim();
+      if (id && !/^[A-Za-z0-9_-]{6,100}$/.test(id)) { toast('That doesn\'t look like a Square application ID.'); return; }
+      Settings.setSquare({ appId: id });
+      drawSquareSettings(onFieldsChange); markChanged();
+      toast(id ? 'Saved the Square application ID' : 'Removed the Square application ID');
+    });
   }
 
   /* ---------- backup view ---------- */
@@ -1063,11 +1241,13 @@
     $('#signInBtn').addEventListener('click', () => Drive.signIn());
 
     // Custom fields.
-    const fieldMeta = (f) => Settings.TYPES[f.type] +
+    const fieldMeta = (f, locked) => Settings.TYPES[f.type] + (f.type === 'currency' ? ' (' + f.currency + ')' : '') +
+      (locked ? ', used by Square' : '') +
       (f.type === 'choice' ? ': ' + f.options.join(', ')
         : f.type === 'text' && f.remember ? ', remembered' + (f.values.length ? ': ' + f.values.join(', ') : '') : '');
     function drawCustomFields() {
       const fields = Settings.fields();
+      const locked = Settings.squareLockedIds();
       $('#cfList').replaceChildren(...fields.map((f) => {
         const li = el('li', { 'data-id': f.id },
           el('button', {
@@ -1084,9 +1264,9 @@
             },
           }),
           el('span', { class: 'cf-name' }, f.name),
-          el('span', { class: 'cf-meta' }, fieldMeta(f)),
+          el('span', { class: 'cf-meta' }, fieldMeta(f, locked.has(f.id))),
           el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + f.name, html: ICON_EDIT, onclick: () => editField(li, f) }),
-          el('button', {
+          locked.has(f.id) ? el('span', { class: 'icon-btn-space', 'aria-hidden': 'true' }) : el('button', {
             class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + f.name, html: ICON_X,
             onclick: () => {
               if (!confirm('Remove the field “' + f.name + '”? It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.')) return;
@@ -1135,7 +1315,11 @@
     // Edit a field in place: name, type, "remember values", and its list (choices or remembered values).
     function editField(li, f) {
       const name = el('input', { maxlength: '60', value: f.name, autocomplete: 'off' });
-      const type = el('select', null, Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
+      const locked = Settings.squareLockedIds().has(f.id);
+      const type = el('select', { disabled: locked, title: locked ? 'Square uses this field, so its type is fixed while Integrate with Square is on' : null },
+        Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
+      const currency = currencySelect(f.currency);
+      const currencyRow = el('label', { class: 'field' }, el('span', null, 'Currency'), currency);
       const remember = el('input', { type: 'checkbox', checked: f.type !== 'text' || f.remember !== false });
       const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember entered values for a drop-down'));
       const list = el('textarea', { rows: '4' });
@@ -1147,6 +1331,7 @@
         if (t === 'text' && type.dataset.was === 'choice') remember.checked = true; // choices become remembered values
         type.dataset.was = t;
         rememberRow.hidden = t !== 'text';
+        currencyRow.hidden = t !== 'currency';
         listRow.hidden = !(t === 'choice' || (t === 'text' && remember.checked));
         listLabel.textContent = t === 'choice' ? 'Choices, one per line' : 'Remembered values, one per line';
       }
@@ -1156,7 +1341,7 @@
       const save = (e) => {
         e.preventDefault();
         try {
-          Settings.editField(f.id, { name: name.value, type: type.value, remember: remember.checked, list: list.value.split('\n') });
+          Settings.editField(f.id, { name: name.value, type: type.value, remember: remember.checked, list: list.value.split('\n'), currency: currency.value });
           drawCustomFields(); markChanged();
           toast('Saved “' + name.value.trim() + '”');
         } catch (err) { toast(err.message); }
@@ -1165,7 +1350,7 @@
         el('div', { class: 'field-row' },
           el('label', { class: 'field' }, el('span', null, 'Field name'), name),
           el('label', { class: 'field' }, el('span', null, 'Type'), type)),
-        el('div', { class: 'field' }, rememberRow), listRow,
+        currencyRow, el('div', { class: 'field' }, rememberRow), listRow,
         el('div', { class: 'cf-edit-actions' },
           el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
           el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawCustomFields }, 'Cancel')));
@@ -1175,14 +1360,19 @@
       name.focus();
     }
     $('#cfType').replaceChildren(...Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v }, label)));
-    const syncAddForm = () => { $('#cfOptionsRow').hidden = $('#cfType').value !== 'choice'; $('#cfRememberRow').hidden = $('#cfType').value !== 'text'; };
+    $('#cfCurrency').replaceWith(Object.assign(currencySelect(), { id: 'cfCurrency' }));
+    const syncAddForm = () => {
+      $('#cfOptionsRow').hidden = $('#cfType').value !== 'choice';
+      $('#cfRememberRow').hidden = $('#cfType').value !== 'text';
+      $('#cfCurrencyRow').hidden = $('#cfType').value !== 'currency';
+    };
     $('#cfType').addEventListener('change', syncAddForm);
     syncAddForm();
     $('#cfAddForm').addEventListener('submit', (e) => {
       e.preventDefault();
       try {
         const type = $('#cfType').value;
-        const f = Settings.addField($('#cfName').value, type, type === 'choice' ? $('#cfOptions').value.split(',') : [], $('#cfRemember').checked);
+        const f = Settings.addField($('#cfName').value, type, type === 'choice' ? $('#cfOptions').value.split(',') : [], $('#cfRemember').checked, $('#cfCurrency').value);
         $('#cfName').value = ''; $('#cfOptions').value = '';
         drawCustomFields();
         markChanged();
@@ -1192,6 +1382,7 @@
       }
     });
     drawCustomFields();
+    drawSquareSettings(drawCustomFields);
 
     // Glaze and clay lists.
     function drawLists() {
@@ -1231,7 +1422,7 @@
       drawLists(); markChanged();
     });
     drawLists();
-    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); drawLists(); }; // keep an open field editor
+    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); drawLists(); drawSquareSettings(drawCustomFields); }; // keep an open field editor
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
@@ -1491,8 +1682,10 @@
     if (Drive.configured) {
       try { auth = await Drive.init(); } catch (e) { /* app works fully offline without Drive */ }
     }
+    const squareReturn = readSquareReturn(); // Square just finished (or cancelled) a sale
     window.addEventListener('hashchange', route);
     route();
+    if (squareReturn) saveSquareSale(squareReturn).catch((e) => toast(e.message || 'Could not save the Square sale.', 5000));
 
     Sync.init({ makeThumb });
     PhotoCache.init({

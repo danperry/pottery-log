@@ -3,13 +3,15 @@
  * Stored on the device (localStorage) and synced to Google Drive inside
  * pottery-log-index.json under "settings". The newest save wins, like pieces.
  *
- *   { fields: [{ id, name, type, options?,        type: text | number | date | yesno | choice
- *                remember?, values?, aliases? }],  text fields: remember typed values (values)
+ *   { fields: [{ id, name, type, options?,        type: text | number | currency | date | yesno | choice | link
+ *                remember?, values?, currency?,   text fields: remember typed values (values)
+ *                aliases? }],                      currency fields: ISO code such as 'USD'
  *                                                  aliases: earlier names, so old piece.json still reads
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
  *     clays: [{ name: 'B-Mix' }, …],              remembered clay bodies (cones are on the bisque and glaze firing)
- *     defaultsAdded: true, defaultsVersion: 2,    which starter fields were offered (each set once)
+ *     square: { enabled: true, appId: '' },      "Integrate with Square" (on unless turned off)
+ *     defaultsAdded: true, defaultsVersion: 3,    which starter fields were offered (each set once)
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
@@ -20,7 +22,62 @@
   'use strict';
 
   const KEY = 'potteryLog.settings';
-  const TYPES = { text: 'Text', number: 'Number', date: 'Date', yesno: 'Yes / no', choice: 'Choice list' };
+  const TYPES = { text: 'Text', number: 'Number', currency: 'Currency', date: 'Date', yesno: 'Yes / no', choice: 'Choice list', link: 'Link' };
+
+  // The currency used where this device is, from its language setting's region (en-GB → GBP).
+  const EURO = 'AT BE CY DE EE ES FI FR GR HR IE IT LT LU LV MT NL PT SI SK AD MC SM VA ME XK';
+  const REGION_CURRENCY = {
+    US: 'USD', CA: 'CAD', GB: 'GBP', AU: 'AUD', NZ: 'NZD', JP: 'JPY', CN: 'CNY', HK: 'HKD', TW: 'TWD', KR: 'KRW',
+    SG: 'SGD', IN: 'INR', CH: 'CHF', LI: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK', IS: 'ISK', PL: 'PLN', CZ: 'CZK',
+    HU: 'HUF', RO: 'RON', BG: 'BGN', MX: 'MXN', BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', PE: 'PEN', ZA: 'ZAR',
+    IL: 'ILS', TR: 'TRY', AE: 'AED', SA: 'SAR', TH: 'THB', MY: 'MYR', ID: 'IDR', PH: 'PHP', VN: 'VND', UA: 'UAH',
+    PR: 'USD', EC: 'USD', SV: 'USD', PA: 'USD',
+  };
+  EURO.split(' ').forEach((r) => { REGION_CURRENCY[r] = 'EUR'; });
+  function localCurrency() {
+    try {
+      for (const tag of [...(navigator.languages || []), navigator.language]) {
+        if (!tag) continue;
+        const loc = new Intl.Locale(tag);
+        const region = loc.region || (loc.maximize && loc.maximize().region);
+        if (region && REGION_CURRENCY[region]) return REGION_CURRENCY[region];
+      }
+    } catch (e) { /* older browser */ }
+    return 'USD';
+  }
+  const isCurrency = (c) => {
+    if (!/^[A-Z]{3}$/.test(String(c || ''))) return false;
+    try { new Intl.NumberFormat('en', { style: 'currency', currency: c }); return true; } catch (e) { return false; }
+  };
+  /** Digits after the decimal point (2 for USD, 0 for JPY). */
+  function minorDigits(currency) {
+    try { return new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits; } catch (e) { return 2; }
+  }
+  /** Currencies for the drop-down: what the browser knows, with names, local one first. */
+  function currencyChoices() {
+    let codes = Object.values(REGION_CURRENCY);
+    try { if (Intl.supportedValuesOf) codes = Intl.supportedValuesOf('currency'); } catch (e) { /* keep the short list */ }
+    let names = null;
+    try { names = new Intl.DisplayNames(undefined, { type: 'currency' }); } catch (e) { /* codes only */ }
+    const local = localCurrency();
+    return [...new Set([local, ...codes])].map((code) => ({ code, label: code + (names ? ' · ' + names.of(code) : '') }));
+  }
+
+  /** A typed link: adds https:// when it's left off. Anything that isn't http(s) is refused. */
+  function cleanLink(v) {
+    v = String(v == null ? '' : v).trim().slice(0, 2000);
+    if (!v) return '';
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(v)) v = 'https://' + v;
+    try { const u = new URL(v); return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : ''; } catch (e) { return ''; }
+  }
+
+  // "Integrate with Square": the fields a sale fills in. Found by id, or by name for a field
+  // the user made themselves before this existed.
+  const SQUARE_FIELDS = [
+    { role: 'price', id: 'cf-price', name: 'Price', type: 'currency' },
+    { role: 'sold', id: 'cf-sold', name: 'Sold', type: 'yesno' },
+    { role: 'transaction', id: 'cf-transaction', name: 'Transaction', type: 'link' },
+  ];
 
   // Built-in fields that can be used as home-screen filters (stage always has its chips).
   const BUILTIN_FILTERS = [
@@ -38,10 +95,11 @@
   const DEFAULT_FIELDS = [
     { id: 'cf-purpose', name: 'Purpose', type: 'text', remember: true, values: ['Keep', 'Give', 'Sell'] },
     { id: 'cf-line', name: 'Line', type: 'text', remember: true, values: [] },
-    { id: 'cf-price', name: 'Price', type: 'number' },
+    { id: 'cf-price', name: 'Price', type: 'currency' },
     { id: 'cf-sold', name: 'Sold', type: 'yesno' },
   ];
-  const DEFAULTS_VERSION = 2;
+  // Version 3 made Price a currency field and added the Square fields (when Square is on).
+  const DEFAULTS_VERSION = 3;
 
   const cleanList = (list, max = 120) => {
     const seen = new Set();
@@ -67,6 +125,7 @@
         const type = TYPES[f.type] ? f.type : 'text';
         const out = { id: String(f.id), name: String(f.name).trim().slice(0, 60), type };
         if (type === 'choice') out.options = cleanList(f.options);
+        if (type === 'currency') out.currency = isCurrency(f.currency) ? f.currency : localCurrency();
         if (type === 'text') {
           if (typeof f.remember === 'boolean') out.remember = f.remember; // unset: older field, set up on first sync
           out.values = cleanList(f.values, 200);
@@ -86,7 +145,9 @@
       .map((c) => (typeof c === 'string' ? { name: c } : c || {}))
       .map((c) => ({ name: String(c.name || '').trim().slice(0, 120) })) // older lists had a cone per clay: dropped
       .filter((c) => uniqueBy(c.name));
-    return { fields, filters: [...new Set(filters)], glazes, clays, defaultsAdded: !!s.defaultsAdded,
+    const sq = s.square && typeof s.square === 'object' ? s.square : {};
+    const square = { enabled: sq.enabled !== false, appId: String(sq.appId || '').trim().slice(0, 100) };
+    return { fields, filters: [...new Set(filters)], glazes, clays, square, defaultsAdded: !!s.defaultsAdded,
       defaultsVersion: Number(s.defaultsVersion) || (s.defaultsAdded ? 1 : 0), updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
 
@@ -124,8 +185,66 @@
 
   function coerce(f, v) {
     if (f.type === 'yesno') return v === true || v === 'true' || v === 'Yes' || v === 'yes';
-    if (f.type === 'number') { const n = Number(v); return v === '' || Number.isNaN(n) ? '' : n; }
+    if (f.type === 'number' || f.type === 'currency') {
+      if (v === '' || v == null) return '';
+      const n = Number(typeof v === 'string' ? v.replace(/[^\d.,-]/g, '').replace(',', '.') : v);
+      if (Number.isNaN(n)) return '';
+      if (f.type === 'number') return n;
+      const k = 10 ** minorDigits(f.currency);
+      return Math.round(n * k) / k;
+    }
+    if (f.type === 'link') return cleanLink(v);
     return v == null ? '' : String(v);
+  }
+
+  // Display text → number for currency values, so filter drop-downs sort by amount.
+  const amountOf = new Map();
+  function formatMoney(f, v) {
+    const n = Number(v);
+    if (Number.isNaN(n)) return String(v);
+    let text;
+    try { text = new Intl.NumberFormat(undefined, { style: 'currency', currency: f.currency || localCurrency() }).format(n); } catch (e) { text = String(n); }
+    if (amountOf.size > 2000) amountOf.clear();
+    amountOf.set(text, n);
+    return text;
+  }
+
+  function squareField(role, fields = load().fields) {
+    const d = SQUARE_FIELDS.find((x) => x.role === role);
+    return fields.find((f) => f.id === d.id) || fields.find((f) => f.name.toLowerCase() === d.name.toLowerCase()) || null;
+  }
+
+  /** The fields with Price, Sold and Transaction present and of the right type. New ones go
+   * after the existing Square fields (or at the end). Values on pieces are kept. */
+  function withSquareFields(fields) {
+    let out = [...fields];
+    let after = -1;
+    for (const d of SQUARE_FIELDS) {
+      const f = squareField(d.role, out);
+      if (f) {
+        const i = out.indexOf(f);
+        if (f.type !== d.type) {
+          const next = { id: f.id, name: f.name, type: d.type };
+          if (f.aliases) next.aliases = f.aliases;
+          if (d.type === 'currency') next.currency = localCurrency();
+          out[i] = next;
+        }
+        after = Math.max(after, i);
+      } else {
+        const next = { id: out.some((x) => x.id === d.id) ? d.id + '-' + Math.random().toString(36).slice(2, 5) : d.id, name: d.name, type: d.type };
+        if (d.type === 'currency') next.currency = localCurrency();
+        out.splice(after + 1, 0, next);
+        after += 1;
+      }
+    }
+    return out;
+  }
+  const sameFields = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  /** Ids of the fields Square fills in, while it's on (they can't be removed or change type). */
+  function squareLockedIds() {
+    const s = load();
+    if (!s.square.enabled) return new Set();
+    return new Set(SQUARE_FIELDS.map((d) => squareField(d.role, s.fields)).filter(Boolean).map((f) => f.id));
   }
 
   const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'cone', 'firing type', 'forming method'];
@@ -146,6 +265,9 @@
   window.Settings = {
     TYPES,
     BUILTIN_FILTERS,
+    localCurrency,
+    currencyChoices,
+    minorDigits,
     get: load,
     fields: () => load().fields,
     field: (id) => load().fields.find((f) => f.id === id),
@@ -156,7 +278,7 @@
       write(normalize({ ...load(), ...changes, updatedAt: Date.now() }));
     },
 
-    addField(name, type, options, remember = true) {
+    addField(name, type, options, remember = true, currency) {
       const s = load();
       name = checkName(name);
       let id = 'cf-' + slug(name);
@@ -167,18 +289,20 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (field.type === 'text') { field.remember = !!remember; field.values = cleanList(options, 200); }
+      if (field.type === 'currency') field.currency = isCurrency(currency) ? currency : localCurrency();
       this.update({ fields: [...s.fields, field] });
       return field;
     },
 
     /** Change a field's name, type, or its list (choices, or remembered values for text).
      * Switching text ↔ choice carries the list across. Values already on pieces are kept. */
-    editField(id, { name, type, remember, list }) {
+    editField(id, { name, type, remember, list, currency }) {
       const s = load();
       const old = s.fields.find((f) => f.id === id);
       if (!old) throw new Error('That field no longer exists');
       name = checkName(name, id);
       type = TYPES[type] ? type : old.type;
+      if (type !== old.type && squareLockedIds().has(id)) throw new Error('Square uses “' + old.name + '”, so its type stays ' + TYPES[old.type] + '. Turn off Integrate with Square to change it.');
       const field = { id, name, type };
       const carried = list !== undefined ? cleanList(list) : old.type === 'choice' ? old.options : old.values || [];
       if (type === 'choice') {
@@ -186,6 +310,7 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (type === 'text') { field.remember = remember !== undefined ? !!remember : old.type === 'choice' || old.remember !== false; field.values = carried; }
+      if (type === 'currency') field.currency = isCurrency(currency) ? currency : old.currency || localCurrency();
       const aliases = [...(old.aliases || [])];
       if (old.name.toLowerCase() !== name.toLowerCase()) aliases.push(old.name);
       if (aliases.length) field.aliases = aliases.slice(-5);
@@ -217,10 +342,11 @@
       const s = load();
       let fields = s.fields;
       const needsRemember = fields.some((f) => f.type === 'text' && f.remember === undefined);
-      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember) return false;
+      const needsSquare = s.square.enabled && !sameFields(withSquareFields(fields), fields);
+      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember && !needsSquare) return false;
       fields = fields.map((f) => (f.type === 'text' && f.remember === undefined
         ? { ...f, remember: true, values: cleanList([...(f.values || []), ...valuesFor(f.id)], 200) } : f));
-      if (s.defaultsVersion < DEFAULTS_VERSION) {
+      if (s.defaultsVersion < 2) {
         const names = new Set(fields.map((f) => f.name.toLowerCase()));
         const ids = new Set(fields.map((f) => f.id));
         // Version 1 offered Purpose, Line and Price; ones removed since then stay removed.
@@ -230,6 +356,10 @@
         const rank = (f) => { const i = DEFAULT_FIELDS.findIndex((d) => d.id === f.id); return i < 0 ? DEFAULT_FIELDS.length : i; };
         fields = fields.map((f, i) => [f, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([f]) => f);
       }
+      if (s.defaultsVersion < 3) { // Price was a plain number before currency fields existed
+        fields = fields.map((f) => (f.id === 'cf-price' && f.type === 'number' ? { ...f, type: 'currency', currency: localCurrency() } : f));
+      }
+      if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
       if (quiet) write(normalize(next)); else this.update(next);
       return true;
@@ -247,6 +377,7 @@
 
     removeField(id) {
       const s = load();
+      if (squareLockedIds().has(id)) throw new Error('Square uses this field. Turn off Integrate with Square to remove it.');
       this.update({ fields: s.fields.filter((f) => f.id !== id), filters: s.filters.filter((x) => x !== id) });
     },
 
@@ -254,7 +385,21 @@
     format(f, v) {
       if (f.type === 'yesno') return v === true ? 'Yes' : 'No'; // unset means No
       if (v === undefined || v === null || v === '') return '';
+      if (f.type === 'currency') return formatMoney(f, v);
       return String(v);
+    },
+    /** A number to sort a currency field's display text by. */
+    amountOf: (text) => (amountOf.has(text) ? amountOf.get(text) : Number(String(text).replace(/[^\d.-]/g, ''))),
+
+    // ----- Square -----
+    square: () => load().square,
+    squareField: (role) => squareField(role),
+    squareLockedIds,
+    /** Turn the integration on or off, or set the app ID. Turning it on adds any missing fields. */
+    setSquare(changes) {
+      const s = load();
+      const square = { ...s.square, ...changes };
+      this.update({ square, fields: square.enabled ? withSquareFields(s.fields) : s.fields });
     },
 
     namedValues,
@@ -289,7 +434,7 @@
     /** What goes into the index (no local bookkeeping). */
     forDrive() {
       const s = load();
-      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, defaultsAdded: s.defaultsAdded, defaultsVersion: s.defaultsVersion, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
+      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, square: s.square, defaultsAdded: s.defaultsAdded, defaultsVersion: s.defaultsVersion, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
     },
     isDirty(rootId) { const s = load(); return !!s.updatedAt && (!s.sync || s.sync.root !== rootId || s.sync.syncedAt !== s.updatedAt); },
     markSynced(rootId, at) { const s = load(); write({ ...s, sync: { root: rootId, syncedAt: at } }); },
