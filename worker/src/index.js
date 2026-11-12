@@ -15,6 +15,13 @@
  *   POST /auth/revoke    { blob } -> { ok }. Revokes the refresh token with Google,
  *                        used by the app's Disconnect button.
  *
+ * It also relays Square Point of Sale results (see "Square relay" below):
+ *
+ *   GET  /square/return  Square's callback after a sale. Keeps the result for a day
+ *                        under the key in its state, then redirects to the app with
+ *                        Square's parameters unchanged.
+ *   POST /square/result  { key } -> the kept result (once), or 404 if none yet.
+ *
  * The refresh token only ever exists in plain form inside this Worker. The app holds
  * the encrypted blob, which is useless without TOKEN_ENC_KEY.
  *
@@ -23,6 +30,8 @@
  *   GOOGLE_CLIENT_ID      secret  OAuth "Web application" client ID
  *   GOOGLE_CLIENT_SECRET  secret  Its client secret
  *   TOKEN_ENC_KEY         secret  32 random bytes, base64 (openssl rand -base64 32)
+ *   SQUARE_RELAY          KV      Namespace for Square results (optional; without it
+ *                                 /square/return only redirects)
  */
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -53,6 +62,11 @@ export default {
           return await api(request, env, refreshAccessToken);
         case '/auth/revoke':
           return await api(request, env, revoke);
+        case '/square/return':
+          if (request.method !== 'GET') return text('Method not allowed', 405);
+          return await squareReturn(request, env);
+        case '/square/result':
+          return await squareResult(request, env);
         default:
           return text('Not found', 404);
       }
@@ -159,6 +173,72 @@ async function revoke(env, refreshToken) {
   // A token Google no longer knows is already revoked, which is the outcome we want.
   if (res.ok || res.status === 400) return { status: 200, body: { ok: true } };
   return { status: 502, body: { error: 'upstream_error' } };
+}
+
+/* ---------- Square relay ----------
+ *
+ * On iPhone, Square returns to its callback URL in Safari, even when the sale started in
+ * the home-screen app, and Safari can't see the home-screen app's pieces. So the callback
+ * is this Worker: it keeps the result under a random key the app put in the sale's state
+ * ("pl:<pieceId>:<key>"), and the home-screen app fetches it when you switch back to it.
+ * Results hold only Square's transaction IDs and the piece ID, and expire after a day.
+ */
+
+const SQUARE_PREFIX = 'com.squareup.pos.';
+const RELAY_TTL = 86400; // seconds
+const RELAY_KEY = /^[A-Za-z0-9_-]{22,64}$/;
+
+function squareResultFrom(url) {
+  const q = url.searchParams;
+  if (q.has('data')) { // iOS: one JSON parameter
+    let d = null;
+    try { d = JSON.parse(q.get('data')); } catch (e) { return null; }
+    if (!d || typeof d !== 'object') return null;
+    return { serverId: d.transaction_id, clientId: d.client_transaction_id, state: d.state,
+      error: d.status === 'ok' ? null : d.error_code || 'error' };
+  }
+  if (![...q.keys()].some((k) => k.startsWith(SQUARE_PREFIX))) return null; // Android: one parameter each
+  return { serverId: q.get(SQUARE_PREFIX + 'SERVER_TRANSACTION_ID'), clientId: q.get(SQUARE_PREFIX + 'CLIENT_TRANSACTION_ID'),
+    state: q.get(SQUARE_PREFIX + 'REQUEST_METADATA'), error: q.get(SQUARE_PREFIX + 'ERROR_CODE'),
+    errorText: q.get(SQUARE_PREFIX + 'ERROR_DESCRIPTION') };
+}
+
+async function squareReturn(request, env) {
+  const url = new URL(request.url);
+  const r = squareResultFrom(url);
+  const m = r && typeof r.state === 'string' && r.state.match(/^pl:([^:]{1,100}):([^:]+)$/);
+  if (m && RELAY_KEY.test(m[2]) && env.SQUARE_RELAY) {
+    const clip = (v, n = 200) => (v == null ? null : String(v).slice(0, n));
+    const kept = { pieceId: m[1], serverId: clip(r.serverId), clientId: clip(r.clientId), error: clip(r.error),
+      errorText: clip(r.errorText, 500), at: Date.now() };
+    await env.SQUARE_RELAY.put('sq:' + m[2], JSON.stringify(kept), { expirationTtl: RELAY_TTL });
+  }
+  // Pass Square's parameters on, so an app open in this browser saves the sale straight away.
+  return redirect(env.APP_URL + url.search);
+}
+
+async function squareResult(request, env) {
+  const allowed = new URL(env.APP_URL).origin;
+  const cors = {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+  if (request.headers.get('Origin') !== allowed) return json({ error: 'forbidden_origin' }, 403, { Vary: 'Origin' });
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, cors);
+  if (!env.SQUARE_RELAY) return json({ error: 'not_configured' }, 503, cors);
+  const raw = await request.text();
+  if (raw.length > 1024) return json({ error: 'too_large' }, 413, cors);
+  let k;
+  try { k = JSON.parse(raw).key; } catch (e) { /* handled below */ }
+  if (typeof k !== 'string' || !RELAY_KEY.test(k)) return json({ error: 'invalid_request' }, 400, cors);
+  const value = await env.SQUARE_RELAY.get('sq:' + k);
+  if (!value) return json({ error: 'not_found' }, 404, cors);
+  await env.SQUARE_RELAY.delete('sq:' + k); // read once
+  return json(JSON.parse(value), 200, cors);
 }
 
 /** Shared handling for the two JSON endpoints: CORS, origin lock, body parsing, blob decryption. */

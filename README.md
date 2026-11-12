@@ -107,7 +107,7 @@ Changes in Google Cloud can take a few minutes to take effect. If you see `Error
 
 ## Sign-in Worker
 
-Browser-only Google sign-in can't keep you signed in: it only hands out access tokens that last an hour, and getting a long-lived *refresh token* needs the OAuth client secret, which can't live in a public web page. `worker/` is a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) that holds the secret and does just that part. It stores nothing.
+Browser-only Google sign-in can't keep you signed in: it only hands out access tokens that last an hour, and getting a long-lived *refresh token* needs the OAuth client secret, which can't live in a public web page. `worker/` is a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) that holds the secret and does just that part. Apart from Square sale results waiting for the app (kept for a day at most), it stores nothing.
 
 | Endpoint | What it does |
 | --- | --- |
@@ -115,6 +115,8 @@ Browser-only Google sign-in can't keep you signed in: it only hands out access t
 | `GET /auth/callback` | Exchanges Google's code for tokens using the client secret, encrypts the refresh token with AES-GCM (key `TOKEN_ENC_KEY`), and redirects back to the app with the encrypted blob in the URL fragment. The fragment isn't sent to GitHub's servers, and the app removes it from the address bar and history straight away. |
 | `POST /auth/token` | Takes `{ blob }`, decrypts it, asks Google for a fresh access token, and returns only `{ access_token, expires_in, expires_at }`. Returns `401 {"error":"invalid_grant"}` when the sign-in is no longer valid. |
 | `POST /auth/revoke` | Takes `{ blob }` and revokes the refresh token with Google. Used by **Disconnect**. |
+| `GET /square/return` | Square's callback after a sale (see [Selling with Square](#selling-with-square)). Keeps the result (transaction IDs and piece ID only) in the `SQUARE_RELAY` KV namespace for a day, under a random key the app put in the sale, then redirects to the app with Square's parameters. |
+| `POST /square/result` | Takes `{ key }` and returns that sale's result once (then deletes it), or 404 if it hasn't arrived. App origin only. |
 
 `/auth/token` and `/auth/revoke` only answer requests from the app's origin (`APP_URL`), and send CORS headers for that origin only. The app keeps the encrypted blob in IndexedDB, and the access token in memory only. Neither is ever put in `localStorage`. The blob is useless without `TOKEN_ENC_KEY`.
 
@@ -136,6 +138,13 @@ npx wrangler secret put GOOGLE_CLIENT_ID       # the OAuth client ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET   # the OAuth client secret
 openssl rand -base64 32                        # make a key, then paste it into:
 npx wrangler secret put TOKEN_ENC_KEY
+```
+
+For Square checkout, create the KV namespace once and put the id it prints into `wrangler.toml` (`[[kv_namespaces]]`, binding `SQUARE_RELAY`), then deploy again:
+
+```sh
+npx wrangler kv namespace create SQUARE_RELAY
+npx wrangler deploy
 ```
 
 Finally:
@@ -221,12 +230,12 @@ Pieces saved by older versions have a single `"clayBody"`; the app reads it as a
 
 ### Custom fields and filters
 
-Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Line** (text), **Price** (number) and **Sold** (yes / no, No unless ticked). They're added once, so if you remove one it stays removed on all your devices. Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
+Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Type** (text, starting with Bowl, Vase and Mug), **Price** (currency) and **Sold** (yes / no, No unless ticked). With **Integrate with Square** on (the default), there's also **Transaction** (a link); see [Selling with Square](#selling-with-square). They're added once, so if you remove one it stays removed on all your devices. (Logs started before Type existed had it as **Line**; it's renamed to Type with Bowl, Vase and Mug added, unless you'd already renamed it.) Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
 
-Add your own fields (Text, Number, Date, Yes / no, or a Choice list) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
+Add your own fields (Text, Number, Currency, Date, Yes / no, a Choice list, or a Link) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
-"customFields": { "Line": "Speckled", "Price": 45, "Purpose": "Give" }
+"customFields": { "Type": "Mug", "Price": 45, "Purpose": "Give" }
 ```
 
 Each text field has its own **Remember entered values for a drop-down** setting (on by default for new fields): the edit form shows a drop-down of the values entered so far, with **+ New…** to type another. Tap the pencil next to a field to rename it, change its type, turn remembering on or off, or edit its list one value per line. Switching a remembered text field to a choice list turns its remembered values into the choices, and switching back does the reverse. Values already saved on pieces are never changed. A renamed field still reads older `piece.json` files that use its previous name.
@@ -234,6 +243,23 @@ Each text field has its own **Remember entered values for a drop-down** setting 
 On the home screen, the filter button next to search opens a pop-up where you choose which fields to filter by: clay body, forming method, glaze, bisque or glaze firing type and cone, or any of your own fields. Each chosen field becomes a drop-down listing the values your pieces have. The field definitions (with remembered values) and the filter choice are stored in `pottery-log-index.json` under `"settings"` and sync like pieces (latest save wins). The values you pick in the drop-downs stay on each device.
 
 Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
+
+A **Currency** field has its own currency, which starts as the one for your device's region (for example GBP for en-GB) and can be changed in the field's settings. Amounts are shown in that currency and saved in `piece.json` as plain numbers. A **Link** field holds a web address (https:// is added if you leave it off) and shows as a tappable link.
+
+### Selling with Square
+
+**Settings → Square → Integrate with Square** is on by default. While it's on, every piece has **Price** (currency), **Sold** (yes / no) and **Transaction** (link). Those three can be renamed but not removed or changed to another type; turn the integration off to do that.
+
+A piece with a price that isn't sold gets a **Charge with Square** button. On an Android phone or an iPhone/iPad it opens the Square Point of Sale app with the price filled in and a note holding the piece's title and link. When the sale finishes, Square opens Pottery Log again; the piece is marked **Sold** and **Transaction** links to the sale in your Square Dashboard. A cancelled sale changes nothing.
+
+One-time setup (free):
+
+1. Sign in at [developer.squareup.com/apps](https://developer.squareup.com/apps) with your Square account and create an application.
+2. Copy its **Production Application ID** (starts with `sq0idp-`) into `squareAppId` in `js/config.js`. It isn't a secret, and everyone using the app shares it: each sale goes to whichever Square account is signed in to the Square app on that phone, so other users don't need a developer account. (With `squareAppId` empty, each user enters their own ID in **Settings → Square**.)
+3. In the application, open **Point of Sale API** and under **Web** add the callback URL shown in Settings. With the sign-in Worker set up it's the Worker's `/square/return`, e.g. `https://pottery-log-auth.danperry.workers.dev/square/return` (without one, it's the app's own address). Save.
+4. Install the Square Point of Sale app on the phone and sign in.
+
+The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app. That's why the callback goes through the Worker: it keeps the result, and when you switch back to Pottery Log on your home screen, the app fetches it and marks the piece sold. Safari shows a short note saying so, with the transaction link as a fallback. On Android, Chrome and the installed app share their pieces, so the sale is saved straight away. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
 
 ### Conflicts: the latest save wins
 

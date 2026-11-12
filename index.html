@@ -98,6 +98,7 @@
         </div>
         <ol class="stage-track" id="dTrack" aria-label="Stage progress"></ol>
         <button class="btn btn-secondary btn-small" id="advanceBtn" hidden></button>
+        <button class="btn btn-square" id="squareBtn" hidden></button>
         <dl class="facts" id="dFacts"></dl>
         <div id="dNotesWrap" hidden>
           <h3>Notes</h3>
@@ -293,12 +294,30 @@
           <div class="field" id="cfRememberRow">
             <label class="yesno"><input type="checkbox" id="cfRemember" checked><b>Remember entered values for a drop-down</b></label>
           </div>
+          <label class="field" id="cfCurrencyRow" hidden>
+            <span>Currency</span>
+            <select id="cfCurrency"></select>
+          </label>
           <label class="field" id="cfOptionsRow" hidden>
             <span>Choices, separated by commas</span>
             <input id="cfOptions" maxlength="500" placeholder="e.g. Big kiln, Test kiln, Studio" autocomplete="off">
           </label>
           <button type="submit" class="btn btn-secondary btn-small">Add field</button>
         </form>
+      </div>
+
+      <div class="panel" id="squarePanel">
+        <h2>Square</h2>
+        <label class="yesno square-toggle"><input type="checkbox" id="squareOn"><b>Integrate with Square</b></label>
+        <p class="muted">Adds Price, Sold and Transaction to every piece, and a <strong>Charge with Square</strong> button on pieces with a price that aren't sold. It opens the Square Point of Sale app on your phone with the price filled in and the piece's link in the note. When the sale is done you come back here, and the piece is marked Sold with a link to the transaction.</p>
+        <div id="squareSetup" hidden>
+          <p class="warn" id="squareNoId" hidden>Add your Square application ID to start charging.</p>
+          <form class="list-add" id="squareForm">
+            <input id="squareAppId" maxlength="100" autocomplete="off" spellcheck="false" aria-label="Square application ID">
+            <button type="submit" class="btn btn-secondary btn-small">Save</button>
+          </form>
+          <p class="muted small" id="squareHelp">To get one: sign in at <a href="https://developer.squareup.com/apps" target="_blank" rel="noopener">developer.squareup.com/apps</a>, create an application, and copy its <strong>Production Application ID</strong>. Then open <strong>Point of Sale API</strong> and, under Web, add this callback URL: <code id="squareCallback"></code></p>
+        </div>
       </div>
 
       <div class="panel">

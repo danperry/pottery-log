@@ -407,3 +407,15 @@ dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .meter { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 10px 0 6px; }
 .meter > div { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .3s; }
 .meter.full > div { background: var(--danger); }
+
+/* Square */
+.btn-square { display: flex; width: 100%; margin: 12px 0 4px; background: #1a1a1a; color: #fff; }
+.btn-square:active { background: #333; }
+.fact-link { color: var(--accent); font-weight: 600; }
+.icon-btn-space { flex: none; width: 38px; }
+.square-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 0; }
+.square-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+.square-toggle b { font-weight: 600; }
+#squarePanel code { overflow-wrap: anywhere; }
+.square-note { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50; max-width: 520px; margin: 0 auto; padding: 14px 16px; border-radius: 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: 0 10px 40px rgba(0, 0, 0, .25); }
+.square-note p { margin: 0 0 10px; }
