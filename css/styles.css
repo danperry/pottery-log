@@ -327,6 +327,9 @@ fieldset.field > legend { margin-bottom: 6px; }
 .install-tip p { margin: 0; font-size: .92rem; color: var(--muted); }
 .install-tip .tip-glyph { display: inline-block; vertical-align: -3px; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .install-tip .btn { margin-top: 8px; }
+.install-tip.tip-warn { background: var(--surface); border: 1px solid var(--danger); box-shadow: inset 4px 0 0 var(--danger); }
+.install-tip.tip-warn .tip-title { color: var(--danger); }
+.install-tip.tip-warn p + p { margin-top: 6px; }
 .install-tip .icon-btn { flex: none; margin: -6px 0 0; color: var(--muted); }
 
 /* Field filters on the home screen */

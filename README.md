@@ -298,6 +298,10 @@ The app stays connected until you tap **Disconnect**, across restarts and withou
 - **Reconnect Google Drive:** Google ends a sign-in when you remove the app's access in your Google account, or when it goes unused for 6 months. It also ends after 7 days while the consent screen is still in Testing. When that happens, the app forgets the saved sign-in and shows a single **Reconnect Google Drive** button. Everything on the device stays, and you can keep logging pieces. Changes made meanwhile sync after you reconnect.
 - **Disconnect** revokes the app's access with Google and deletes the saved sign-in from this device. Your files in Drive and your pieces on the device are kept. Pieces that came from Drive but were never opened on this device keep only their summary until you reconnect. If Google can't be reached at that moment, the app says so; you can also remove access at <https://myaccount.google.com/connections>.
 
+### Only saved in this browser
+
+Until Google Drive is connected with a folder, the home screen shows an **Only saved in this browser** warning once there's at least one piece. Browsers can delete a site's stored data when browsing data is cleared, and Safari deletes it for sites not opened for a few weeks unless they're on the home screen. The warning has a Connect Google Drive button (or Choose a Drive folder, once signed in), and on an iPhone it also says how to add the app to the home screen. Closing it hides it for a week. Settings shows the same note above Sign in with Google.
+
 ## Adding to an Android home screen
 
 Open the site in Chrome on Android, then tap **⋮ → Add to Home screen** (or **Install app** if Chrome offers it). It opens full-screen like a regular app and works offline. Adding it to the home screen also makes Chrome much less likely to clear its stored data.
