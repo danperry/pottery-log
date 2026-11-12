@@ -94,11 +94,12 @@
   // Version 2 added Sold and put them in this order.
   const DEFAULT_FIELDS = [
     { id: 'cf-purpose', name: 'Purpose', type: 'text', remember: true, values: ['Keep', 'Give', 'Sell'] },
-    { id: 'cf-line', name: 'Line', type: 'text', remember: true, values: [] },
+    { id: 'cf-line', name: 'Type', type: 'text', remember: true, values: ['Bowl', 'Vase', 'Mug'] },
     { id: 'cf-price', name: 'Price', type: 'currency' },
     { id: 'cf-sold', name: 'Sold', type: 'yesno' },
   ];
-  // Version 3 made Price a currency field and added the Square fields (when Square is on).
+  // Version 3 made Price a currency field, renamed Line to Type (with Bowl, Vase and Mug), and
+  // added the Square fields (when Square is on).
   const DEFAULTS_VERSION = 3;
 
   const cleanList = (list, max = 120) => {
@@ -356,8 +357,16 @@
         const rank = (f) => { const i = DEFAULT_FIELDS.findIndex((d) => d.id === f.id); return i < 0 ? DEFAULT_FIELDS.length : i; };
         fields = fields.map((f, i) => [f, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([f]) => f);
       }
-      if (s.defaultsVersion < 3) { // Price was a plain number before currency fields existed
+      if (s.defaultsVersion < 3) {
+        // Price was a plain number before currency fields existed.
         fields = fields.map((f) => (f.id === 'cf-price' && f.type === 'number' ? { ...f, type: 'currency', currency: localCurrency() } : f));
+        // The starter "Line" field became "Type" (unless it was renamed, or "Type" is taken).
+        // Its old name stays as an alias so existing piece.json files still read.
+        const typeTaken = fields.some((f) => f.id !== 'cf-line' && f.name.toLowerCase() === 'type');
+        fields = fields.map((f) => (f.id === 'cf-line' && f.name === 'Line' && !typeTaken
+          ? { ...f, name: 'Type', aliases: [...(f.aliases || []), 'Line'],
+            ...(f.type === 'text' ? { values: cleanList([...(f.values || []), 'Bowl', 'Vase', 'Mug'], 200) } : {}) }
+          : f));
       }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };

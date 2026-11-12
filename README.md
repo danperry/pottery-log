@@ -221,12 +221,12 @@ Pieces saved by older versions have a single `"clayBody"`; the app reads it as a
 
 ### Custom fields and filters
 
-Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Line** (text), **Price** (currency) and **Sold** (yes / no, No unless ticked). With **Integrate with Square** on (the default), there's also **Transaction** (a link); see [Selling with Square](#selling-with-square). They're added once, so if you remove one it stays removed on all your devices. Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
+Every log starts with four custom fields: **Purpose** (text, starting with Keep, Give and Sell), **Type** (text, starting with Bowl, Vase and Mug), **Price** (currency) and **Sold** (yes / no, No unless ticked). With **Integrate with Square** on (the default), there's also **Transaction** (a link); see [Selling with Square](#selling-with-square). They're added once, so if you remove one it stays removed on all your devices. (Logs started before Type existed had it as **Line**; it's renamed to Type with Bowl, Vase and Mug added, unless you'd already renamed it.) Drag a field by its dots in Settings (or focus the dots and use the arrow keys) to change the order; the edit form and details follow it, and the order syncs.
 
 Add your own fields (Text, Number, Currency, Date, Yes / no, a Choice list, or a Link) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
-"customFields": { "Line": "Speckled", "Price": 45, "Purpose": "Give" }
+"customFields": { "Type": "Mug", "Price": 45, "Purpose": "Give" }
 ```
 
 Each text field has its own **Remember entered values for a drop-down** setting (on by default for new fields): the edit form shows a drop-down of the values entered so far, with **+ New…** to type another. Tap the pencil next to a field to rename it, change its type, turn remembering on or off, or edit its list one value per line. Switching a remembered text field to a choice list turns its remembered values into the choices, and switching back does the reverse. Values already saved on pieces are never changed. A renamed field still reads older `piece.json` files that use its previous name.
