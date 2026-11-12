@@ -83,12 +83,40 @@
   }
 
   let toastTimer = null;
-  function toast(msg, ms = 2600) {
+  /** Show a short message. action: { label, run } adds a button (e.g. Undo) to it. */
+  function toast(msg, ms = 2600, action) {
     const t = $('#toast');
-    t.textContent = msg;
+    t.replaceChildren(el('span', null, msg));
+    t.classList.toggle('has-action', !!action);
+    const hide = () => { t.classList.remove('show', 'has-action'); clearTimeout(toastTimer); };
+    if (action) {
+      t.append(el('button', { type: 'button', class: 'toast-action', onclick: () => { hide(); action.run(); } }, action.label));
+    }
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+    toastTimer = setTimeout(hide, ms);
+  }
+
+  /**
+   * The app's own pop-up in place of the browser's confirm() and alert().
+   * Resolves true when confirmed. Without cancel (cancel: null) it's a notice with one button.
+   */
+  function ask({ title, message, confirm = 'OK', cancel = 'Cancel', danger = false }) {
+    return new Promise((resolve) => {
+      const titleId = 'ask-' + Date.now();
+      const body = Array.isArray(message) ? message : [message];
+      const dlg = el('dialog', { class: 'sheet ask', 'aria-labelledby': titleId },
+        el('form', { method: 'dialog' },
+          el('h2', { id: titleId }, title),
+          ...body.filter(Boolean).map((m) => (typeof m === 'string' ? el('p', { class: 'ask-text' }, m) : m)),
+          el('div', { class: 'form-actions ask-actions' },
+            cancel ? el('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, cancel) : null,
+            el('button', { type: 'submit', class: 'btn ' + (danger ? 'btn-danger' : 'btn-primary'), value: 'ok', autofocus: !danger }, confirm))));
+      dlg.addEventListener('close', () => { resolve(dlg.returnValue === 'ok'); dlg.remove(); });
+      document.body.append(dlg);
+      dlg.showModal();
+      if (danger && cancel) dlg.querySelector('[value=cancel]').focus(); // a stray Enter doesn't destroy anything
+    });
   }
 
   function stagePill(stage) {
@@ -753,17 +781,33 @@
 
     $('#editBtn').hidden = !!p.stub;
     $('#editBtn').onclick = () => nav('#/edit/' + encodeURIComponent(p.id));
-    $('#deleteBtn').onclick = async () => {
-      const inDrive = p.sync && p.sync.folderId;
-      if (!confirm('Delete "' + (p.title || 'Untitled') + '" and its photos?' +
-        (inDrive ? ' Its folder in Google Drive will be moved to the trash.' : ' This cannot be undone.'))) return;
-      await DB.deletePiece(p.id);
-      // Remember the delete so other devices delete it too.
-      if (p.sync) await DB.putPiece({ id: p.id, title: p.title, deleted: true, updatedAt: Date.now(), sync: p.sync });
-      markChanged();
-      toast('Piece deleted');
-      nav('#/', true);
-    };
+    $('#deleteBtn').onclick = () => deletePiece(p.id);
+  }
+
+  /** Delete a piece straight away, with Undo in the toast for a few seconds. */
+  async function deletePiece(id) {
+    const p = await DB.getPiece(id);
+    if (!p) return;
+    // Keep everything needed to put it back: the record, its photos and its list thumbnail.
+    const photos = (await Promise.all((p.photoIds || []).map((pid) => DB.getPhoto(pid)))).filter(Boolean);
+    const thumb = await DB.getPieceThumb(p.id);
+    await DB.deletePiece(p.id);
+    // Remember the delete so other devices delete it too.
+    if (p.sync) await DB.putPiece({ id: p.id, title: p.title, deleted: true, updatedAt: Date.now(), sync: p.sync });
+    markChanged();
+    nav('#/', true);
+    toast('Deleted “' + (p.title || 'Untitled') + '”', 8000, {
+      label: 'Undo',
+      run: async () => {
+        for (const ph of photos) await DB.putPhoto(ph);
+        if (thumb) await DB.putPhoto(thumb);
+        // A newer save than the delete, so it comes back everywhere (its Drive folder leaves the trash).
+        await DB.putPiece({ ...p, updatedAt: Date.now() });
+        markChanged();
+        toast('Piece restored');
+        if (location.hash === '#/' || location.hash === '') route();
+      },
+    });
   }
 
   function lightbox(url) {
@@ -1314,8 +1358,12 @@
           el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + f.name, html: ICON_EDIT, onclick: () => editField(li, f) }),
           locked.has(f.id) ? el('span', { class: 'icon-btn-space', 'aria-hidden': 'true' }) : el('button', {
             class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + f.name, html: ICON_X,
-            onclick: () => {
-              if (!confirm('Remove the field “' + f.name + '”? It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.')) return;
+            onclick: async () => {
+              if (!(await ask({
+                title: 'Remove “' + f.name + '”?',
+                message: 'It disappears from every piece, here and on your other devices, and is left out of piece.json from then on.',
+                confirm: 'Remove', danger: true,
+              }))) return;
               Settings.removeField(f.id);
               drawCustomFields();
               markChanged();
@@ -1529,7 +1577,11 @@
     });
 
     $('#signOutBtn').addEventListener('click', async () => {
-      if (!confirm('Disconnect Google Drive? Your files stay in Drive and your pieces stay on this device. Pieces from Drive that haven\'t been opened here yet will show only their summary until you reconnect.')) return;
+      if (!(await ask({
+        title: 'Disconnect Google Drive?',
+        message: 'Your files stay in Drive and your pieces stay on this device. Pieces from Drive that haven\'t been opened here yet will show only their summary until you reconnect.',
+        confirm: 'Disconnect', danger: true,
+      }))) return;
       busy(true, 'Disconnecting…', 0.5);
       const { revoked } = await Drive.disconnect();
       busy(false);
@@ -1602,10 +1654,28 @@
     refreshPending().then(() => { if (connected() && pendingCount) runSync({ quiet: true }); });
   }
 
+  /** Tell the person when the same field was changed on two devices, and which change was kept. */
+  function showConflicts(list) {
+    const items = el('ul', { class: 'ask-list' }, list.map((c) => el('li', null,
+      el('a', { href: '#/piece/' + encodeURIComponent(c.id) }, c.title || 'Untitled'),
+      ': ' + c.fields.join(', '))));
+    items.addEventListener('click', (e) => { if (e.target.closest('a')) e.target.closest('dialog').close(); });
+    ask({
+      title: list.length === 1 ? 'A piece was changed on two devices' : list.length + ' pieces were changed on two devices',
+      message: [
+        'These fields were changed differently on another device before they synced. The latest change was kept for each one, and the other change was replaced:',
+        items,
+        'Everything else from both devices was combined.',
+      ],
+      confirm: 'OK', cancel: null,
+    });
+  }
+
   function syncSummary(st) {
     if (!st) return '';
     const parts = [];
     if (st.pulled) parts.push(st.pulled + (st.pulled === 1 ? ' piece' : ' pieces') + ' updated from Drive');
+    if (st.merged) parts.push(st.merged + (st.merged === 1 ? ' piece' : ' pieces') + ' combined with changes from another device');
     if (st.removed) parts.push(st.removed + ' removed');
     if (st.pushed) parts.push(st.pushed + ' saved to Drive');
     if (st.settings === 'pulled') parts.push('fields and filters updated');
@@ -1646,7 +1716,8 @@
         }
         return null; // wait for the next save, launch or reconnect instead of retrying in a loop
       }
-      if (stats.pulled || stats.removed || stats.settings === 'pulled') {
+      if (stats.conflicts && stats.conflicts.length) showConflicts(stats.conflicts);
+      if (stats.pulled || stats.removed || stats.merged || stats.settings === 'pulled') {
         if (!opts.throws) toast(syncSummary(stats), 2500);
         // Show what came from Drive, unless a form is being edited.
         if (!/^#\/(edit|new|backup)/.test(location.hash)) route();
