@@ -210,7 +210,7 @@ Pottery Log/
 
 `thumbnail` is only there when a photo was picked as the thumbnail on the Edit screen. Without it the newest photo is used.
 
-Renaming a piece renames its folder. Deleting a piece moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
+Renaming a piece renames its folder. Deleting a piece (see [Deleting and Undo](#deleting-and-undo)) moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
 
 ### Glazes and clays
 
@@ -261,9 +261,15 @@ One-time setup (free):
 
 The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app. That's why the callback goes through the Worker: it keeps the result, and when you switch back to Pottery Log on your home screen, the app fetches it and marks the piece sold. Safari shows a short note saying so, with the transaction link as a fallback. On Android, Chrome and the installed app share their pieces, so the sale is saved straight away. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
 
-### Conflicts: the latest save wins
+### Conflicts: merged field by field
 
-Every save records when it happened (`savedAt`). If the same piece was changed on two devices before they synced, the version saved most recently is kept, as a whole piece, and the other device picks it up at its next sync. This relies on the devices' clocks being roughly right, which phones keep automatically.
+Every save records when it happened (`savedAt`), and each device remembers what a piece looked like the last time it matched Drive. If the same piece was changed on two devices before they synced, the next sync combines them field by field: a field changed on only one device keeps that change, so editing the notes on your phone and marking it sold on your laptop keeps both. Photos added on either device are kept, and photos removed on either device are removed.
+
+When the same field was changed differently on both devices, the most recent save wins for that field, and the app shows a notice listing the piece and the fields where the other change was replaced. Pieces last synced before this feature have no record of their last synced state, so their first merge treats every differing field as a conflict (latest save wins) and says so. This relies on the devices' clocks being roughly right, which phones keep automatically.
+
+### Deleting and Undo
+
+Deleting a piece happens straight away, with **Undo** in the message at the bottom for a few seconds. Undo puts the piece and its photos back. If it had already synced, its Drive folder comes back out of the trash and your other devices get it back at their next sync.
 
 ### Fast opening: pieces load on demand
 

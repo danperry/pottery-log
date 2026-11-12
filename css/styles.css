@@ -106,6 +106,9 @@ main {
   transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast.show.has-action { pointer-events: auto; }
+.toast-action { background: none; border: 0; padding: 6px 4px; margin: -6px -4px -6px 0; color: var(--accent-soft); font: inherit; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: .04em; }
 
 /* Buttons */
 .btn {
@@ -341,6 +344,10 @@ fieldset.field > legend { margin-bottom: 6px; }
 dialog.sheet { border: 0; border-radius: 18px; padding: 20px; width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 64px); background: var(--surface); color: var(--text); box-shadow: 0 10px 40px rgba(0, 0, 0, .25); }
 dialog.sheet::backdrop { background: rgba(20, 14, 10, .45); }
 dialog.sheet h2 { margin: 0 0 4px; font-size: 1.15rem; }
+dialog.ask .ask-text { margin: 8px 0; line-height: 1.45; }
+dialog.ask .ask-list { margin: 8px 0; padding-left: 20px; line-height: 1.5; }
+dialog.ask .ask-actions { position: static; padding-bottom: 0; background: none; margin-top: 14px; }
+.btn-danger { background: var(--danger); color: var(--bg); }
 .check-list { display: grid; gap: 2px; margin: 12px 0; }
 .check-list label { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 4px; border-radius: 10px; cursor: pointer; }
 .check-list input { width: 20px; height: 20px; accent-color: var(--accent); }

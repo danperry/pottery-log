@@ -432,7 +432,8 @@
       const moved = priceToFollow(fields);
       if (moved) {
         fields = fields.map((f) => (f === moved ? { ...f, currency: localCurrency() } : f));
-        currencyNotice = { name: moved.name, from: moved.currency, to: localCurrency() };
+        // A field that never had a currency (a new log) just takes the local one, quietly.
+        if (moved.currency) currencyNotice = { name: moved.name, from: moved.currency, to: localCurrency() };
       }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
