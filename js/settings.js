@@ -155,7 +155,10 @@
         const type = TYPES[f.type] ? f.type : 'text';
         const out = { id: String(f.id), name: String(f.name).trim().slice(0, 60), type };
         if (type === 'choice') out.options = cleanList(f.options);
-        if (type === 'currency') out.currency = isCurrency(f.currency) ? f.currency : localCurrency();
+        if (type === 'currency') {
+          out.currency = isCurrency(f.currency) ? f.currency : localCurrency();
+          if (f.currencyChosen) out.currencyChosen = true; // picked by the user, not the default
+        }
         if (type === 'text') {
           if (typeof f.remember === 'boolean') out.remember = f.remember; // unset: older field, set up on first sync
           out.values = cleanList(f.values, 200);
@@ -319,7 +322,10 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (field.type === 'text') { field.remember = !!remember; field.values = cleanList(options, 200); }
-      if (field.type === 'currency') field.currency = isCurrency(currency) ? currency : localCurrency();
+      if (field.type === 'currency') {
+        field.currency = isCurrency(currency) ? currency : localCurrency();
+        if (field.currency !== localCurrency()) field.currencyChosen = true;
+      }
       this.update({ fields: [...s.fields, field] });
       return field;
     },
@@ -340,7 +346,10 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (type === 'text') { field.remember = remember !== undefined ? !!remember : old.type === 'choice' || old.remember !== false; field.values = carried; }
-      if (type === 'currency') field.currency = isCurrency(currency) ? currency : old.currency || localCurrency();
+      if (type === 'currency') {
+        field.currency = isCurrency(currency) ? currency : old.currency || localCurrency();
+        if (old.currencyChosen || (old.type === 'currency' && field.currency !== old.currency)) field.currencyChosen = true;
+      }
       const aliases = [...(old.aliases || [])];
       if (old.name.toLowerCase() !== name.toLowerCase()) aliases.push(old.name);
       if (aliases.length) field.aliases = aliases.slice(-5);
@@ -399,7 +408,7 @@
       }
       if (s.defaultsVersion < 4 && localCurrency() !== 'USD') {
         const price = squareField('price', fields);
-        if (price && price.type === 'currency' && price.currency === 'USD') fields = fields.map((f) => (f === price ? { ...f, currency: localCurrency() } : f));
+        if (price && price.type === 'currency' && price.currency === 'USD' && !price.currencyChosen) fields = fields.map((f) => (f === price ? { ...f, currency: localCurrency() } : f));
       }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
