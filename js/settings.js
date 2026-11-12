@@ -128,8 +128,7 @@
   ];
   // Version 3 made Price a currency field, renamed Line to Type (with Bowl, Vase and Mug), and
   // added the Square fields (when Square is on).
-  // Version 4 fixes Price set to USD on devices outside the US whose language is en-US.
-  const DEFAULTS_VERSION = 4;
+  const DEFAULTS_VERSION = 3;
 
   const cleanList = (list, max = 120) => {
     const seen = new Set();
@@ -273,6 +272,12 @@
     return out;
   }
   const sameFields = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  /** The Price field, when it's still on a default currency that isn't this country's. */
+  function priceToFollow(fields) {
+    const p = squareField('price', fields);
+    return p && p.type === 'currency' && !p.currencyChosen && p.currency !== localCurrency() ? p : null;
+  }
+  let currencyNotice = null; // { name, from, to } after Price moved to the local currency
   /** Ids of the fields Square fills in, while it's on (they can't be removed or change type). */
   function squareLockedIds() {
     const s = load();
@@ -382,7 +387,8 @@
       let fields = s.fields;
       const needsRemember = fields.some((f) => f.type === 'text' && f.remember === undefined);
       const needsSquare = s.square.enabled && !sameFields(withSquareFields(fields), fields);
-      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember && !needsSquare) return false;
+      const needsCurrency = !!priceToFollow(fields);
+      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember && !needsSquare && !needsCurrency) return false;
       fields = fields.map((f) => (f.type === 'text' && f.remember === undefined
         ? { ...f, remember: true, values: cleanList([...(f.values || []), ...valuesFor(f.id)], 200) } : f));
       if (s.defaultsVersion < 2) {
@@ -406,15 +412,20 @@
             ...(f.type === 'text' ? { values: cleanList([...(f.values || []), 'Bowl', 'Vase', 'Mug'], 200) } : {}) }
           : f));
       }
-      if (s.defaultsVersion < 4 && localCurrency() !== 'USD') {
-        const price = squareField('price', fields);
-        if (price && price.type === 'currency' && price.currency === 'USD' && !price.currencyChosen) fields = fields.map((f) => (f === price ? { ...f, currency: localCurrency() } : f));
+      // Price follows the country the device is in, unless its currency was picked by hand.
+      const moved = priceToFollow(fields);
+      if (moved) {
+        fields = fields.map((f) => (f === moved ? { ...f, currency: localCurrency() } : f));
+        currencyNotice = { name: moved.name, from: moved.currency, to: localCurrency() };
       }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
       if (quiet) write(normalize(next)); else this.update(next);
       return true;
     },
+
+    /** What setUp changed Price's currency from and to (once), so the app can say so. */
+    takeCurrencyNotice() { const n = currencyNotice; currencyNotice = null; return n; },
 
     /** Put the fields in this order (ids); any not listed keep their place at the end. */
     reorderFields(ids) {

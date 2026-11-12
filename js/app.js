@@ -1679,6 +1679,11 @@
     // edited here, when it's a normal change. When connected, it waits for the sync.
     let changed = afterSync ? Settings.setUp(valuesFor)
       : connected() ? false : Settings.setUp(valuesFor, { quiet: !Settings.get().updatedAt });
+    const moved = Settings.takeCurrencyNotice();
+    if (moved) {
+      toast(moved.name + ' is now in ' + moved.to + ' (it was ' + moved.from + '), the currency where you are. You can change it in Settings → Custom fields.', 7000);
+      if (onBackupStateChange && location.hash.startsWith('#/backup')) onBackupStateChange();
+    }
     if (!store('potteryLog.listsSeeded')) {
       const names = await noteSeedNames();
       if (!afterSync) return Settings.learn(names, { quiet: true }) || changed;
