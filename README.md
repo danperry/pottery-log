@@ -235,7 +235,7 @@ Every log starts with four custom fields: **Purpose** (text, starting with Keep,
 Add your own fields (Text, Number, Currency, Date, Yes / no, a Choice list, or a Link) under **Settings → Custom fields** (the gear icon). They appear on every piece's edit form and details, and in `piece.json` by name:
 
 ```json
-"customFields": { "Type": "Mug", "Price": 45, "Purpose": "Give" }
+"customFields": { "Type": "Mug", "Price": { "amount": 45, "currency": "CAD" }, "Purpose": "Give" }
 ```
 
 Each text field has its own **Remember entered values for a drop-down** setting (on by default for new fields): the edit form shows a drop-down of the values entered so far, with **+ New…** to type another. Tap the pencil next to a field to rename it, change its type, turn remembering on or off, or edit its list one value per line. Switching a remembered text field to a choice list turns its remembered values into the choices, and switching back does the reverse. Values already saved on pieces are never changed. A renamed field still reads older `piece.json` files that use its previous name.
@@ -244,7 +244,7 @@ On the home screen, the filter button next to search opens a pop-up where you ch
 
 Removing a field hides it everywhere and leaves it out of `piece.json` the next time each piece is saved.
 
-A **Currency** field has its own currency, which starts as the one for your device's region (for example GBP for en-GB) and can be changed in the field's settings. Amounts are shown in that currency and saved in `piece.json` as plain numbers. A **Link** field holds a web address (https:// is added if you leave it off) and shows as a tappable link.
+A **Currency** field stores each price with its own currency, e.g. `"Price": { "amount": 45, "currency": "CAD" }` in `piece.json`, and the edit form has a currency drop-down next to the amount. New prices start in the field's default currency: the one where the device is (from its time zone, then the language's region). When you open the app in another country, the default moves to that country's currency and a notice says so; prices already entered keep theirs. Pick a default by hand in the field's settings and it stays put. Prices saved before this (plain numbers) take the local currency once, when the app first opens. A **Link** field holds a web address (https:// is added if you leave it off) and shows as a tappable link.
 
 ### Selling with Square
 

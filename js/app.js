@@ -866,10 +866,17 @@
         return el('label', { class: 'field' }, el('span', null, cf.name), input,
           el('datalist', { id: listId }, seen.map((x) => el('option', { value: x }))));
       } else if (cf.type === 'currency') {
-        const digits = Settings.minorDigits(cf.currency);
-        input = el('input', { name, type: 'number', min: '0', step: digits ? String(10 ** -digits) : '1', inputmode: digits ? 'decimal' : 'numeric' });
-        if (v !== undefined && v !== null && v !== '') input.value = Number(v).toFixed(digits);
-        return el('label', { class: 'field' }, el('span', null, cf.name + ' (' + cf.currency + ')'), input);
+        // Each price keeps its own currency; new ones start with the field's default.
+        const m = Settings.money(cf, v);
+        const cur = currencySelect(m ? m.currency : cf.currency);
+        cur.name = 'cfcur:' + cf.id;
+        cur.setAttribute('aria-label', cf.name + ' currency');
+        cur.classList.add('money-currency');
+        input = el('input', { name, type: 'number', min: '0', inputmode: 'decimal', 'aria-label': cf.name });
+        const setStep = () => { const d = Settings.minorDigits(cur.value); input.step = d ? String(10 ** -d) : '1'; };
+        cur.addEventListener('change', setStep); setStep();
+        if (m) input.value = m.amount.toFixed(Settings.minorDigits(m.currency));
+        return el('div', { class: 'field' }, el('span', null, cf.name), el('div', { class: 'money-row' }, input, cur));
       } else if (cf.type === 'link') {
         input = el('input', { name, type: 'url', inputmode: 'url', maxlength: '2000', autocomplete: 'off', placeholder: 'https://' });
       } else {
@@ -952,7 +959,9 @@
       for (const cf of Settings.fields()) {
         const input = form.elements['cf:' + cf.id];
         if (!input) continue;
-        const v = cf.type === 'yesno' ? input.checked : Settings.coerce(cf, input.value.trim());
+        const v = cf.type === 'yesno' ? input.checked
+          : cf.type === 'currency' ? Settings.coerce(cf, { amount: input.value.trim(), currency: form.elements['cfcur:' + cf.id].value })
+            : Settings.coerce(cf, input.value.trim());
         if (cf.type === 'link' && v === '' && input.value.trim()) { toast('“' + cf.name + '” needs a web address, such as https://…'); input.focus(); return; }
         if (v === '') delete custom[cf.id];
         else custom[cf.id] = v;
@@ -1019,18 +1028,18 @@
     const price = Settings.squareField('price');
     const sold = Settings.squareField('sold');
     const custom = p.custom || {};
-    const amount = price ? Number(custom[price.id]) : NaN;
-    btn.hidden = !Settings.square().enabled || p.stub || !(amount > 0) || (sold && custom[sold.id] === true);
+    const m = price && price.type === 'currency' ? Settings.money(price, custom[price.id]) : null;
+    btn.hidden = !Settings.square().enabled || p.stub || !(m && m.amount > 0) || (sold && custom[sold.id] === true);
     if (btn.hidden) return;
-    btn.textContent = 'Charge ' + Settings.format(price, amount) + ' with Square';
-    btn.onclick = () => startSquareCharge(p, price, amount);
+    btn.textContent = 'Charge ' + Settings.format(price, m) + ' with Square';
+    btn.onclick = () => startSquareCharge(p, m);
   }
 
-  function startSquareCharge(p, price, amount) {
+  function startSquareCharge(p, { amount, currency }) {
     const appId = squareAppId();
     if (!appId) { toast('Add your Square application ID in Settings first.', 4000); return nav('#/backup'); }
     if (!isAndroid() && !isIOS()) { toast('Square checkout opens the Square Point of Sale app, so use it on your phone or tablet.', 4500); return; }
-    const total = Math.round(amount * 10 ** Settings.minorDigits(price.currency));
+    const total = Math.round(amount * 10 ** Settings.minorDigits(currency));
     const note = ('Pottery Log: ' + (p.title || 'Untitled')).slice(0, 200) + ' ' + pieceUrl(p.id);
     const key = relayUrl() ? Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b & 63]).join('') : '';
     const state = 'pl:' + p.id + (key ? ':' + key : '');
@@ -1042,7 +1051,7 @@
         extra('S.com.squareup.pos.CLIENT_ID', appId) +
         extra('S.com.squareup.pos.API_VERSION', 'v2.0') +
         extra('i.com.squareup.pos.TOTAL_AMOUNT', String(total)) +
-        extra('S.com.squareup.pos.CURRENCY_CODE', price.currency) +
+        extra('S.com.squareup.pos.CURRENCY_CODE', currency) +
         extra('S.com.squareup.pos.TENDER_TYPES', 'com.squareup.pos.TENDER_CARD,com.squareup.pos.TENDER_CARD_ON_FILE,com.squareup.pos.TENDER_CASH,com.squareup.pos.TENDER_OTHER') +
         extra('S.com.squareup.pos.NOTE', note) +
         extra('S.com.squareup.pos.REQUEST_METADATA', state) +
@@ -1050,7 +1059,7 @@
         'end';
     } else {
       const data = {
-        amount_money: { amount: total, currency_code: price.currency },
+        amount_money: { amount: total, currency_code: currency },
         callback_url: squareCallbackUrl(), client_id: appId, version: '1.3', notes: note, state,
         options: { supported_tender_types: ['CREDIT_CARD', 'CASH', 'OTHER', 'SQUARE_GIFT_CARD', 'CARD_ON_FILE'] },
       };
@@ -1278,7 +1287,7 @@
     $('#signInBtn').addEventListener('click', () => Drive.signIn());
 
     // Custom fields.
-    const fieldMeta = (f, locked) => Settings.TYPES[f.type] + (f.type === 'currency' ? ' (' + f.currency + ')' : '') +
+    const fieldMeta = (f, locked) => Settings.TYPES[f.type] + (f.type === 'currency' ? ', new prices in ' + f.currency : '') +
       (locked ? ', used by Square' : '') +
       (f.type === 'choice' ? ': ' + f.options.join(', ')
         : f.type === 'text' && f.remember ? ', remembered' + (f.values.length ? ': ' + f.values.join(', ') : '') : '');
@@ -1356,7 +1365,7 @@
       const type = el('select', { disabled: locked, title: locked ? 'Square uses this field, so its type is fixed while Integrate with Square is on' : null },
         Object.entries(Settings.TYPES).map(([v, label]) => el('option', { value: v, selected: v === f.type }, label)));
       const currency = currencySelect(f.currency);
-      const currencyRow = el('label', { class: 'field' }, el('span', null, 'Currency'), currency);
+      const currencyRow = el('label', { class: 'field' }, el('span', null, 'Currency for new prices'), currency);
       const remember = el('input', { type: 'checkbox', checked: f.type !== 'text' || f.remember !== false });
       const rememberRow = el('label', { class: 'yesno' }, remember, el('b', null, 'Remember entered values for a drop-down'));
       const list = el('textarea', { rows: '4' });
@@ -1679,6 +1688,11 @@
     // edited here, when it's a normal change. When connected, it waits for the sync.
     let changed = afterSync ? Settings.setUp(valuesFor)
       : connected() ? false : Settings.setUp(valuesFor, { quiet: !Settings.get().updatedAt });
+    const moved = Settings.takeCurrencyNotice();
+    if (moved) {
+      toast('New ' + moved.name.toLowerCase() + 's will be in ' + moved.to + ' (was ' + moved.from + '), the currency where you are. Existing ones keep theirs. Change it in Settings.', 7000);
+      if (onBackupStateChange && location.hash.startsWith('#/backup')) onBackupStateChange();
+    }
     if (!store('potteryLog.listsSeeded')) {
       const names = await noteSeedNames();
       if (!afterSync) return Settings.learn(names, { quiet: true }) || changed;
@@ -1690,6 +1704,17 @@
     const s = Settings.get(); // set up quietly and Drive had nothing newer: upload it
     if (!s.updatedAt && (s.glazes.length || s.clays.length || s.fields.length)) { Settings.update({}); return true; }
     return false;
+  }
+
+  /** Prices saved as plain numbers (before each price carried its currency) get the currency
+   * they were entered in, so a later change of the default doesn't change them. Local only:
+   * piece.json picks it up on the next save, and other devices do the same when they read it. */
+  async function pinOldPrices() {
+    if (!Settings.fields().some((f) => f.type === 'currency')) return;
+    for (const p of await DB.allPieces()) {
+      const custom = !p.deleted && Settings.pinPrices(p.custom);
+      if (custom) await DB.putPiece({ ...p, custom });
+    }
   }
 
   /** Load a synced piece's notes and photos the first time it's opened on this device. */
@@ -1732,6 +1757,7 @@
       onChange: () => { if (onBackupStateChange && location.hash.startsWith('#/backup')) drawStorage(); },
     });
     PhotoCache.check(3000);
+    await pinOldPrices();
     seedLists(false);
     try { localStorage.removeItem('potteryLog.changeSeq'); localStorage.removeItem('potteryLog.backedSeq'); localStorage.removeItem('potteryLog.lastBackup'); localStorage.removeItem('potteryLog.deviceId'); } catch (e) { /* ignore */ }
     refreshPending().catch(() => {});

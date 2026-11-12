@@ -5,7 +5,8 @@
  *
  *   { fields: [{ id, name, type, options?,        type: text | number | currency | date | yesno | choice | link
  *                remember?, values?, currency?,   text fields: remember typed values (values)
- *                aliases? }],                      currency fields: ISO code such as 'USD'
+ *                aliases? }],                      currency fields: default for new prices, e.g. 'CAD'
+ *                                                  (currencyChosen: picked by hand, so it doesn't follow the country)
  *                                                  aliases: earlier names, so old piece.json still reads
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
@@ -15,7 +16,8 @@
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
- * A piece keeps its values in piece.custom = { fieldId: value }. In Drive they are
+ * A piece keeps its values in piece.custom = { fieldId: value }. A currency value carries its own
+ * currency, { amount: 24.5, currency: 'CAD' }, so changing the default never changes old prices. In Drive they are
  * written by field name ("customFields": { "Kiln": "Big kiln" }) so they read naturally.
  */
 (function () {
@@ -34,12 +36,40 @@
     PR: 'USD', EC: 'USD', SV: 'USD', PA: 'USD',
   };
   EURO.split(' ').forEach((r) => { REGION_CURRENCY[r] = 'EUR'; });
-  function localCurrency() {
+  // Where the device is, from its time zone. Many phones keep the language as en-US outside
+  // the US, so the time zone is checked first (America/Vancouver → Canada → CAD).
+  const ZONE_REGION = {};
+  const zones = (region, prefix, names) => names.split(' ').forEach((n) => { ZONE_REGION[prefix + n] = region; });
+  zones('CA', 'America/', 'Vancouver Edmonton Winnipeg Regina Swift_Current Toronto Montreal Nipigon Thunder_Bay Rainy_River Atikokan ' +
+    'Halifax Glace_Bay Moncton Goose_Bay St_Johns Blanc-Sablon Whitehorse Dawson Dawson_Creek Fort_Nelson Creston Yellowknife Inuvik ' +
+    'Iqaluit Pangnirtung Rankin_Inlet Resolute Cambridge_Bay');
+  zones('CA', 'Canada/', 'Pacific Mountain Central Saskatchewan Eastern Atlantic Newfoundland Yukon');
+  zones('US', 'America/', 'New_York Chicago Denver Los_Angeles Phoenix Anchorage Boise Detroit Juneau Sitka Nome Adak Yakutat Metlakatla Menominee');
+  zones('US', 'Pacific/', 'Honolulu');
+  zones('MX', 'America/', 'Mexico_City Monterrey Merida Cancun Chihuahua Hermosillo Mazatlan Tijuana Bahia_Banderas Matamoros Ojinaga');
+  zones('GB', 'Europe/', 'London Belfast');
+  zones('NZ', 'Pacific/', 'Auckland Chatham');
+  Object.assign(ZONE_REGION, {
+    'Europe/Dublin': 'IE', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Rome': 'IT', 'Europe/Amsterdam': 'NL',
+    'Europe/Brussels': 'BE', 'Europe/Vienna': 'AT', 'Europe/Lisbon': 'PT', 'Europe/Helsinki': 'FI', 'Europe/Athens': 'GR', 'Europe/Zurich': 'CH',
+    'Europe/Stockholm': 'SE', 'Europe/Oslo': 'NO', 'Europe/Copenhagen': 'DK', 'Europe/Warsaw': 'PL', 'Europe/Prague': 'CZ', 'Asia/Tokyo': 'JP',
+    'Asia/Kolkata': 'IN', 'Asia/Singapore': 'SG', 'Asia/Hong_Kong': 'HK', 'Africa/Johannesburg': 'ZA', 'America/Sao_Paulo': 'BR',
+  });
+  function zoneRegion() {
     try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      if (ZONE_REGION[tz]) return ZONE_REGION[tz];
+      if (/^America\/(Indiana|Kentucky|North_Dakota)\//.test(tz)) return 'US';
+      if (tz.startsWith('Australia/')) return 'AU';
+    } catch (e) { /* older browser */ }
+    return null;
+  }
+  function localCurrency() {
+    const zone = zoneRegion();
+    if (zone && REGION_CURRENCY[zone]) return REGION_CURRENCY[zone];
+    try { // otherwise the region in the language setting, when it names one (en-GB, fr-CA)
       for (const tag of [...(navigator.languages || []), navigator.language]) {
-        if (!tag) continue;
-        const loc = new Intl.Locale(tag);
-        const region = loc.region || (loc.maximize && loc.maximize().region);
+        const region = tag && new Intl.Locale(tag).region;
         if (region && REGION_CURRENCY[region]) return REGION_CURRENCY[region];
       }
     } catch (e) { /* older browser */ }
@@ -126,7 +156,10 @@
         const type = TYPES[f.type] ? f.type : 'text';
         const out = { id: String(f.id), name: String(f.name).trim().slice(0, 60), type };
         if (type === 'choice') out.options = cleanList(f.options);
-        if (type === 'currency') out.currency = isCurrency(f.currency) ? f.currency : localCurrency();
+        if (type === 'currency') {
+          out.currency = isCurrency(f.currency) ? f.currency : localCurrency();
+          if (f.currencyChosen) out.currencyChosen = true; // picked by the user, not the default
+        }
         if (type === 'text') {
           if (typeof f.remember === 'boolean') out.remember = f.remember; // unset: older field, set up on first sync
           out.values = cleanList(f.values, 200);
@@ -186,25 +219,39 @@
 
   function coerce(f, v) {
     if (f.type === 'yesno') return v === true || v === 'true' || v === 'Yes' || v === 'yes';
-    if (f.type === 'number' || f.type === 'currency') {
-      if (v === '' || v == null) return '';
-      const n = Number(typeof v === 'string' ? v.replace(/[^\d.,-]/g, '').replace(',', '.') : v);
-      if (Number.isNaN(n)) return '';
-      if (f.type === 'number') return n;
-      const k = 10 ** minorDigits(f.currency);
-      return Math.round(n * k) / k;
+    if (f.type === 'currency') {
+      const obj = v && typeof v === 'object';
+      const n = toNumber(obj ? v.amount : v);
+      if (n === '') return '';
+      const currency = obj && isCurrency(v.currency) ? v.currency : pinCurrency(f);
+      const k = 10 ** minorDigits(currency);
+      return { amount: Math.round(n * k) / k, currency };
     }
+    if (v && typeof v === 'object' && 'amount' in v) v = v.amount; // was a currency field
+    if (f.type === 'number') return toNumber(v);
     if (f.type === 'link') return cleanLink(v);
     return v == null ? '' : String(v);
   }
 
+  function toNumber(v) {
+    if (v === '' || v == null) return '';
+    const n = Number(typeof v === 'string' ? v.replace(/[^\d.,-]/g, '').replace(',', '.') : v);
+    return Number.isNaN(n) ? '' : n;
+  }
+  /** The currency for a price saved before prices carried their own: the field's, if it was
+   * picked by hand, otherwise the one where the device is now (when the price was entered). */
+  const pinCurrency = (f) => (f.currencyChosen && isCurrency(f.currency) ? f.currency : localCurrency());
+  /** A currency field's value as { amount, currency }, or null when empty. */
+  function money(f, v) { const m = coerce(f, v); return m === '' ? null : m; }
+
   // Display text → number for currency values, so filter drop-downs sort by amount.
   const amountOf = new Map();
   function formatMoney(f, v) {
-    const n = Number(v);
-    if (Number.isNaN(n)) return String(v);
+    const m = money(f, v);
+    if (!m) return '';
+    const n = m.amount;
     let text;
-    try { text = new Intl.NumberFormat(undefined, { style: 'currency', currency: f.currency || localCurrency() }).format(n); } catch (e) { text = String(n); }
+    try { text = new Intl.NumberFormat(undefined, { style: 'currency', currency: m.currency }).format(n); } catch (e) { text = String(n); }
     if (amountOf.size > 2000) amountOf.clear();
     amountOf.set(text, n);
     return text;
@@ -241,6 +288,12 @@
     return out;
   }
   const sameFields = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  /** The Price field, when it's still on a default currency that isn't this country's. */
+  function priceToFollow(fields) {
+    const p = squareField('price', fields);
+    return p && p.type === 'currency' && !p.currencyChosen && p.currency !== localCurrency() ? p : null;
+  }
+  let currencyNotice = null; // { name, from, to } after Price moved to the local currency
   /** Ids of the fields Square fills in, while it's on (they can't be removed or change type). */
   function squareLockedIds() {
     const s = load();
@@ -290,7 +343,10 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (field.type === 'text') { field.remember = !!remember; field.values = cleanList(options, 200); }
-      if (field.type === 'currency') field.currency = isCurrency(currency) ? currency : localCurrency();
+      if (field.type === 'currency') {
+        field.currency = isCurrency(currency) ? currency : localCurrency();
+        if (field.currency !== localCurrency()) field.currencyChosen = true;
+      }
       this.update({ fields: [...s.fields, field] });
       return field;
     },
@@ -311,7 +367,10 @@
         if (!field.options.length) throw new Error('Add at least one choice');
       }
       if (type === 'text') { field.remember = remember !== undefined ? !!remember : old.type === 'choice' || old.remember !== false; field.values = carried; }
-      if (type === 'currency') field.currency = isCurrency(currency) ? currency : old.currency || localCurrency();
+      if (type === 'currency') {
+        field.currency = isCurrency(currency) ? currency : old.currency || localCurrency();
+        if (old.currencyChosen || (old.type === 'currency' && field.currency !== old.currency)) field.currencyChosen = true;
+      }
       const aliases = [...(old.aliases || [])];
       if (old.name.toLowerCase() !== name.toLowerCase()) aliases.push(old.name);
       if (aliases.length) field.aliases = aliases.slice(-5);
@@ -344,7 +403,8 @@
       let fields = s.fields;
       const needsRemember = fields.some((f) => f.type === 'text' && f.remember === undefined);
       const needsSquare = s.square.enabled && !sameFields(withSquareFields(fields), fields);
-      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember && !needsSquare) return false;
+      const needsCurrency = !!priceToFollow(fields);
+      if (s.defaultsVersion >= DEFAULTS_VERSION && !needsRemember && !needsSquare && !needsCurrency) return false;
       fields = fields.map((f) => (f.type === 'text' && f.remember === undefined
         ? { ...f, remember: true, values: cleanList([...(f.values || []), ...valuesFor(f.id)], 200) } : f));
       if (s.defaultsVersion < 2) {
@@ -368,11 +428,35 @@
             ...(f.type === 'text' ? { values: cleanList([...(f.values || []), 'Bowl', 'Vase', 'Mug'], 200) } : {}) }
           : f));
       }
+      // Price follows the country the device is in, unless its currency was picked by hand.
+      const moved = priceToFollow(fields);
+      if (moved) {
+        fields = fields.map((f) => (f === moved ? { ...f, currency: localCurrency() } : f));
+        currencyNotice = { name: moved.name, from: moved.currency, to: localCurrency() };
+      }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
       if (quiet) write(normalize(next)); else this.update(next);
       return true;
     },
+
+    money,
+    /** Give plain-number prices (saved before prices carried a currency) their currency.
+     * Returns the updated custom values, or null if nothing needed it. */
+    pinPrices(custom) {
+      if (!custom) return null;
+      let out = null;
+      for (const f of load().fields) {
+        const v = custom[f.id];
+        if (f.type !== 'currency' || v === undefined || v === '' || (v && typeof v === 'object')) continue;
+        out = out || { ...custom };
+        const m = coerce(f, v);
+        if (m === '') delete out[f.id]; else out[f.id] = m;
+      }
+      return out;
+    },
+    /** What setUp changed Price's currency from and to (once), so the app can say so. */
+    takeCurrencyNotice() { const n = currencyNotice; currencyNotice = null; return n; },
 
     /** Put the fields in this order (ids); any not listed keep their place at the end. */
     reorderFields(ids) {
