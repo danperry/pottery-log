@@ -847,7 +847,10 @@
       const v = custom[cf.id];
       if (cf.type === 'yesno') {
         return el('div', { class: 'field' }, el('span', null, cf.name),
-          el('label', { class: 'yesno' }, el('input', { type: 'checkbox', name, checked: v === true }), el('b', null, 'Yes')));
+          el('label', { class: 'yesno' }, el('input', {
+            type: 'checkbox', name, checked: v === true,
+            onchange: (e) => { e.target.nextElementSibling.textContent = e.target.checked ? 'Yes' : 'No'; }, // says what it's set to
+          }), el('b', null, v === true ? 'Yes' : 'No')));
       }
       let input;
       if (cf.type === 'choice') {
