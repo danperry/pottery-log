@@ -70,11 +70,13 @@
     };
   }
 
-  function toPieceJson(p, photoNames) {
+  function toPieceJson(p, photoNames, thumbnailName) {
     return {
       ...describe(p),
       notes: p.notes || '',
       photos: photoNames,
+      // The photo picked as the thumbnail in Edit. Left out means the newest photo.
+      ...(thumbnailName ? { thumbnail: thumbnailName } : {}),
       savedAt: iso(p.updatedAt),
       createdAt: iso(p.createdAt),
       id: p.id,
@@ -111,7 +113,7 @@
 
   function indexEntry(p) {
     if (p.deleted) return { id: p.id, title: p.title || '', deleted: true, savedAt: iso(p.updatedAt) };
-    const cover = (p.photoIds || [])[0];
+    const cover = PhotoCache.coverOf(p);
     const s = p.sync || {};
     return {
       id: p.id,
@@ -119,6 +121,7 @@
       photoCount: p.photoCount != null && p.stub ? p.photoCount : (p.photoIds || []).length,
       coverPhotoId: cover || null,
       coverFileId: (cover && s.photoFiles && s.photoFiles[cover]) || null,
+      ...(p.coverPhotoId && cover === p.coverPhotoId ? { coverPicked: true } : {}),
       folderId: s.folderId,
       pieceFileId: s.fileId,
       savedAt: iso(p.updatedAt),
@@ -187,10 +190,16 @@
     const nextName = () => { let n = 1; while (used.has('photo-' + n + '.jpg')) n++; const name = 'photo-' + n + '.jpg'; used.add(name); return name; };
     const names = [];
     const photoFiles = {};
+    let thumbnailName = null;
     for (const pid of p.photoIds || []) {
       let f = remotePhotos.get(pid);
       if (!f) {
-        const photo = await DB.getPhoto(pid);
+        let photo = await DB.getPhoto(pid);
+        // Removed from this device to save room, but still in the previous Drive folder: fetch it to copy it over.
+        const was = p.sync && p.sync.photoFiles && p.sync.photoFiles[pid];
+        if (!photo && was) {
+          try { await savePhoto(pid, was); photo = await DB.getPhoto(pid); } catch (e) { /* gone from Drive too */ }
+        }
         if (!photo) continue; // nothing to upload
         const name = nextName();
         const id = await Drive.create({ name, parents: [folderId], appProperties: { potteryPhotoId: pid, potteryPieceId: p.id } }, photo.blob);
@@ -198,13 +207,14 @@
       }
       names.push(f.name);
       photoFiles[pid] = f.id;
+      if (pid === p.coverPhotoId) thumbnailName = f.name;
     }
     for (const [pid, f] of remotePhotos) {
       if (!photoFiles[pid]) await Drive.trash(f.id);
     }
 
     const meta = { appProperties: { potteryLog: 'piece', potteryPieceId: p.id, potteryRoot: rootId, potterySavedAt: String(p.updatedAt) } };
-    const blob = jsonBlob(toPieceJson(p, names));
+    const blob = jsonBlob(toPieceJson(p, names, thumbnailName));
     let fileId;
     if (pieceFile) { await Drive.update(pieceFile.id, meta, blob); fileId = pieceFile.id; }
     else fileId = await Drive.create({ ...meta, name: PIECE_NAME, parents: [folderId], mimeType: 'application/json' }, blob);
@@ -233,12 +243,14 @@
     const byName = new Map(files.filter((f) => !isFolder(f)).map((f) => [f.name, f]));
     const photoIds = [];
     const photoFiles = {};
+    let coverPhotoId;
     for (const name of Array.isArray(j.photos) ? j.photos : []) {
       const f = byName.get(String(name));
       if (!f) continue;
       const pid = (f.appProperties || {}).potteryPhotoId || 'drive-' + f.id;
       photoIds.push(pid);
       photoFiles[pid] = f.id;
+      if (j.thumbnail && String(j.thumbnail) === String(name)) coverPhotoId = pid;
     }
 
     const fields = fromDescription(j);
@@ -252,6 +264,7 @@
       id,
       notes: str(j.notes),
       photoIds,
+      coverPhotoId,
       createdAt: fields.createdAt || cur.createdAt,
       stub: false,
       photoCount: undefined,
@@ -479,6 +492,7 @@
       stub: true,
       deleted: false,
       photoIds: cover && coverFile ? [cover] : [],
+      coverPhotoId: cover && coverFile && e.coverPicked ? cover : undefined,
       photoCount: Number(e.photoCount) || (cover ? 1 : 0),
       sync: { root: rootId, folderId: R.folderId, fileId: R.fileId, syncedAt: R.savedAt, photoFiles: cover && coverFile ? { [cover]: coverFile } : {} },
     });

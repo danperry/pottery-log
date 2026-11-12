@@ -5,6 +5,8 @@ A small, mobile-friendly web app for logging pottery pieces: title, photos, clay
 - **Plain HTML, CSS and JavaScript.** No build step, no dependencies, no framework. 
 - **Data lives on your device** in the browser's IndexedDB, including photos (resized to 1600 px JPEGs).
 - **Photos** swipe on a phone, or use the arrows on a computer. **Add photos** under the photos adds more without opening Edit.
+- **Thumbnails.** Each piece has a small list thumbnail, made from its newest photo. Tap a photo on the Edit screen to use that one instead.
+- **Storage limit.** Settings → *On this device* sets how much room photos may take on this device (500 MB by default). See [Device storage](#device-storage).
 - **Optional sync with your own Google Drive** with "Sign in with Google". The app asks only for the `drive.file` scope, so it can see and change only the files it created, never the rest of your Drive. You sign in once and stay connected, thanks to a tiny sign-in Worker on Cloudflare's free tier (`worker/`).
 - **Installable** on Android (and desktop Chrome) through the web app manifest, and it opens offline thanks to a small service worker.
 
@@ -15,7 +17,8 @@ index.html               App shell and view templates
 privacy.html             Privacy policy (link it on the OAuth consent screen)
 css/styles.css           Styles (light and dark)
 js/config.js             Worker URL, Google client ID and API key go here
-js/db.js                 IndexedDB storage (pieces, photos, encrypted sign-in)
+js/db.js                 IndexedDB storage (pieces, photos, thumbnails, encrypted sign-in)
+js/photo-cache.js        Keeps photos under the storage limit (removes old ones that are safe in Drive)
 js/drive.js              Google sign-in (via the Worker) and Drive API calls
 js/settings.js           Custom fields, filter choices and the glaze and clay lists (synced in the index)
 js/sync.js               Two-way sync with the Drive folder (one folder per piece)
@@ -189,11 +192,14 @@ Pottery Log/
   "dates": { "made": "2026-11-02", "bisqueFired": "2026-11-08", "glazeFired": "2026-11-11", "finished": "" },
   "notes": "Thin rim, two coats.",
   "photos": ["photo-1.jpg", "photo-2.jpg"],
+  "thumbnail": "photo-1.jpg",
   "savedAt": "2026-11-11T15:04:05.000Z",
   "createdAt": "2026-11-02T18:00:00.000Z",
   "id": "…"
 }
 ```
+
+`thumbnail` is only there when a photo was picked as the thumbnail on the Edit screen. Without it the newest photo is used.
 
 Renaming a piece renames its folder. Deleting a piece moves its folder to Drive's trash (recoverable for 30 days), and the index keeps a short `"deleted": true` entry so your other devices delete it too. Trashing a piece's folder yourself in Drive also removes it from your devices at their next sync, unless a device has unsynced changes to it, in which case that device puts it back. The app only ever touches files it created, so anything else you keep in the folder is left alone.
 
@@ -236,6 +242,14 @@ Every save records when it happened (`savedAt`). If the same piece was changed o
 ### Fast opening: pieces load on demand
 
 On open, the app reads only the index, so even a long log appears quickly. Pieces that came from another device show their summary (title, stage, clay, glazes, dates and cover photo) straight away. Their notes and other photos download the first time you open the piece, and are kept on the device after that. Offline, an unopened piece shows its summary and says the rest will load when you're back online.
+
+### Device storage
+
+Photos are the only thing that takes real room, so the app keeps them under a limit you choose in Settings → *On this device* (100 MB to 5 GB, 500 MB by default; it applies to this device only). When photos go over the limit, the full-size photos of the pieces you opened longest ago are removed from the device until they fit again, with a little to spare. They stay in Google Drive and download again when you open the piece. The piece on screen is never trimmed.
+
+Only photos that are already in the connected Drive folder are ever removed. Without Google Drive connected, or for photos that haven't synced yet, nothing is removed. If you switch to another Drive folder, photos that were removed from the device are downloaded from the old folder and copied over.
+
+Each piece's list thumbnail is small (320 px) and is kept separately, so the list still looks right after full-size photos are removed. Thumbnails are removed only in an emergency: when removing every full-size photo that can be removed still isn't enough. A piece whose thumbnail was removed shows the pot icon in the list until it's opened again.
 
 While the device is offline, a small note under the title bar says everything is saved on the device and will sync when you're back online; saving a piece says the same. The app syncs on its own as soon as the connection returns.
 

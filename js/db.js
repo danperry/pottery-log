@@ -1,7 +1,9 @@
 /* Local storage for Pottery Log, backed by IndexedDB.
  * Object stores:
  *   pieces  – one record per piece (plain JSON)
- *   photos  – { id, blob, thumb, type } image blobs, referenced by piece.photoIds
+ *   photos  – { id, blob, thumb, type } image blobs, referenced by piece.photoIds.
+ *             Each piece's small list thumbnail is kept here too, under the id
+ *             'thumb:' + pieceId, as { id, pieceId, photoId, thumb, type }.
  *   auth    – { id: 'google', blob } the encrypted Google refresh token from the auth Worker
  */
 (function () {
@@ -60,8 +62,11 @@
     return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   }
 
+  const THUMB_PREFIX = 'thumb:';
+
   const DB = {
     uid,
+    THUMB_PREFIX,
 
     async allPieces() {
       const s = await store('pieces', 'readonly');
@@ -87,6 +92,7 @@
       const piece = await reqToPromise(pieces.get(id));
       if (piece) {
         (piece.photoIds || []).forEach((pid) => tx.objectStore('photos').delete(pid));
+        tx.objectStore('photos').delete(THUMB_PREFIX + id);
         pieces.delete(id);
       }
       return txDone(tx);
@@ -113,7 +119,39 @@
 
     async allPhotoIds() {
       const s = await store('photos', 'readonly');
-      return reqToPromise(s.getAllKeys());
+      return (await reqToPromise(s.getAllKeys())).filter((k) => !String(k).startsWith(THUMB_PREFIX));
+    },
+
+    /** A piece's small list thumbnail: { pieceId, photoId, thumb } or undefined. */
+    async getPieceThumb(pieceId) {
+      const s = await store('photos', 'readonly');
+      return reqToPromise(s.get(THUMB_PREFIX + pieceId));
+    },
+
+    async putPieceThumb(pieceId, photoId, thumb) {
+      const s = await store('photos', 'readwrite');
+      await reqToPromise(s.put({ id: THUMB_PREFIX + pieceId, pieceId, photoId, thumb, type: thumb.type }));
+    },
+
+    async deletePieceThumbs(pieceIds) {
+      return this.deletePhotos(pieceIds.map((id) => THUMB_PREFIX + id));
+    },
+
+    /** Size in bytes of everything in the photo store: [{ id, bytes }] (thumbnails included). */
+    async photoSizes() {
+      const s = await store('photos', 'readonly');
+      return new Promise((resolve, reject) => {
+        const out = [];
+        const req = s.openCursor();
+        req.onsuccess = () => {
+          const c = req.result;
+          if (!c) return resolve(out);
+          const v = c.value || {};
+          out.push({ id: c.key, bytes: ((v.blob && v.blob.size) || 0) + ((v.thumb && v.thumb.size) || 0) });
+          c.continue();
+        };
+        req.onerror = () => reject(req.error);
+      });
     },
 
     /** Replace everything with the given pieces; photos not in keepPhotoIds are removed. */
@@ -125,7 +163,7 @@
       pieces.forEach((p) => ps.put(p));
       const photoStore = tx.objectStore('photos');
       const keys = await reqToPromise(photoStore.getAllKeys());
-      keys.forEach((k) => { if (!keepPhotoIds.has(k)) photoStore.delete(k); });
+      keys.forEach((k) => { if (!keepPhotoIds.has(k) && !String(k).startsWith(THUMB_PREFIX)) photoStore.delete(k); });
       return txDone(tx);
     },
 
