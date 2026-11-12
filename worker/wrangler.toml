@@ -14,7 +14,7 @@ APP_URL = "https://danperry.github.io/pottery-log/"
 # Create it once with `npx wrangler kv namespace create SQUARE_RELAY` and put its id here.
 [[kv_namespaces]]
 binding = "SQUARE_RELAY"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "31ede7c3adf84ffdaadb71be00b11472"
 
 # Secrets are NOT set here. Set them once with:
 #   npx wrangler secret put GOOGLE_CLIENT_ID
