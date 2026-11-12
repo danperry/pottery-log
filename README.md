@@ -255,7 +255,7 @@ A piece with a price that isn't sold gets a **Charge with Square** button. On an
 One-time setup (free):
 
 1. Sign in at [developer.squareup.com/apps](https://developer.squareup.com/apps) with your Square account and create an application.
-2. Copy its **Production Application ID** (starts with `sq0idp-`) into **Settings → Square** (or set `squareAppId` in `js/config.js`). It isn't a secret.
+2. Copy its **Production Application ID** (starts with `sq0idp-`) into `squareAppId` in `js/config.js`. It isn't a secret, and everyone using the app shares it: each sale goes to whichever Square account is signed in to the Square app on that phone, so other users don't need a developer account. (With `squareAppId` empty, each user enters their own ID in **Settings → Square**.)
 3. In the application, open **Point of Sale API** and under **Web** add the callback URL shown in Settings. With the sign-in Worker set up it's the Worker's `/square/return`, e.g. `https://pottery-log-auth.danperry.workers.dev/square/return` (without one, it's the app's own address). Save.
 4. Install the Square Point of Sale app on the phone and sign in.
 

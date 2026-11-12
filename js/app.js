@@ -1155,9 +1155,13 @@
     $('#squareSetup').hidden = !sq.enabled;
     const idInput = $('#squareAppId');
     if (document.activeElement !== idInput) idInput.value = sq.appId || '';
-    idInput.placeholder = (window.POTTERY_CONFIG || {}).squareAppId || 'sq0idp-…';
+    idInput.placeholder = 'sq0idp-…';
     $('#squareCallback').textContent = squareCallbackUrl();
     $('#squareNoId').hidden = !!squareAppId();
+    // With an ID built into the app (config.js), there's nothing to set up here.
+    const builtIn = !!(window.POTTERY_CONFIG || {}).squareAppId && !sq.appId;
+    $('#squareForm').hidden = builtIn;
+    $('#squareHelp').hidden = builtIn;
     if (toggle.dataset.wired) return;
     toggle.dataset.wired = '1';
     toggle.addEventListener('change', () => {

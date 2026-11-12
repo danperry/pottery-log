@@ -15,9 +15,10 @@ window.POTTERY_CONFIG = {
   // the Google Picker API, e.g. 'AIzaSy...'.
   googleApiKey: 'AIzaSyCtIGQ7aPKebZJBhBOB-m0c8NWTkJ3wuaw',
 
-  // Square application ID for "Charge with Square" (Settings > Square can set it too, and that
-  // one wins). Not a secret. e.g. 'sq0idp-AbC123...'. See the README.
-  squareAppId: '',
+  // Square application ID for "Charge with Square", shared by everyone using this copy of the
+  // app (each sale goes to whoever is signed in to the Square app). Not a secret. When it's
+  // empty, each user enters their own in Settings > Square. See the README.
+  squareAppId: 'sq0idp-KSE5EZyxX0XL4VFWDKuCHw',
 
   // Cloud project number. Leave empty: it is read from the start of the client ID.
   googleAppId: '',
