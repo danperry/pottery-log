@@ -34,12 +34,40 @@
     PR: 'USD', EC: 'USD', SV: 'USD', PA: 'USD',
   };
   EURO.split(' ').forEach((r) => { REGION_CURRENCY[r] = 'EUR'; });
-  function localCurrency() {
+  // Where the device is, from its time zone. Many phones keep the language as en-US outside
+  // the US, so the time zone is checked first (America/Vancouver → Canada → CAD).
+  const ZONE_REGION = {};
+  const zones = (region, prefix, names) => names.split(' ').forEach((n) => { ZONE_REGION[prefix + n] = region; });
+  zones('CA', 'America/', 'Vancouver Edmonton Winnipeg Regina Swift_Current Toronto Montreal Nipigon Thunder_Bay Rainy_River Atikokan ' +
+    'Halifax Glace_Bay Moncton Goose_Bay St_Johns Blanc-Sablon Whitehorse Dawson Dawson_Creek Fort_Nelson Creston Yellowknife Inuvik ' +
+    'Iqaluit Pangnirtung Rankin_Inlet Resolute Cambridge_Bay');
+  zones('CA', 'Canada/', 'Pacific Mountain Central Saskatchewan Eastern Atlantic Newfoundland Yukon');
+  zones('US', 'America/', 'New_York Chicago Denver Los_Angeles Phoenix Anchorage Boise Detroit Juneau Sitka Nome Adak Yakutat Metlakatla Menominee');
+  zones('US', 'Pacific/', 'Honolulu');
+  zones('MX', 'America/', 'Mexico_City Monterrey Merida Cancun Chihuahua Hermosillo Mazatlan Tijuana Bahia_Banderas Matamoros Ojinaga');
+  zones('GB', 'Europe/', 'London Belfast');
+  zones('NZ', 'Pacific/', 'Auckland Chatham');
+  Object.assign(ZONE_REGION, {
+    'Europe/Dublin': 'IE', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Rome': 'IT', 'Europe/Amsterdam': 'NL',
+    'Europe/Brussels': 'BE', 'Europe/Vienna': 'AT', 'Europe/Lisbon': 'PT', 'Europe/Helsinki': 'FI', 'Europe/Athens': 'GR', 'Europe/Zurich': 'CH',
+    'Europe/Stockholm': 'SE', 'Europe/Oslo': 'NO', 'Europe/Copenhagen': 'DK', 'Europe/Warsaw': 'PL', 'Europe/Prague': 'CZ', 'Asia/Tokyo': 'JP',
+    'Asia/Kolkata': 'IN', 'Asia/Singapore': 'SG', 'Asia/Hong_Kong': 'HK', 'Africa/Johannesburg': 'ZA', 'America/Sao_Paulo': 'BR',
+  });
+  function zoneRegion() {
     try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      if (ZONE_REGION[tz]) return ZONE_REGION[tz];
+      if (/^America\/(Indiana|Kentucky|North_Dakota)\//.test(tz)) return 'US';
+      if (tz.startsWith('Australia/')) return 'AU';
+    } catch (e) { /* older browser */ }
+    return null;
+  }
+  function localCurrency() {
+    const zone = zoneRegion();
+    if (zone && REGION_CURRENCY[zone]) return REGION_CURRENCY[zone];
+    try { // otherwise the region in the language setting, when it names one (en-GB, fr-CA)
       for (const tag of [...(navigator.languages || []), navigator.language]) {
-        if (!tag) continue;
-        const loc = new Intl.Locale(tag);
-        const region = loc.region || (loc.maximize && loc.maximize().region);
+        const region = tag && new Intl.Locale(tag).region;
         if (region && REGION_CURRENCY[region]) return REGION_CURRENCY[region];
       }
     } catch (e) { /* older browser */ }
@@ -100,7 +128,8 @@
   ];
   // Version 3 made Price a currency field, renamed Line to Type (with Bowl, Vase and Mug), and
   // added the Square fields (when Square is on).
-  const DEFAULTS_VERSION = 3;
+  // Version 4 fixes Price set to USD on devices outside the US whose language is en-US.
+  const DEFAULTS_VERSION = 4;
 
   const cleanList = (list, max = 120) => {
     const seen = new Set();
@@ -367,6 +396,10 @@
           ? { ...f, name: 'Type', aliases: [...(f.aliases || []), 'Line'],
             ...(f.type === 'text' ? { values: cleanList([...(f.values || []), 'Bowl', 'Vase', 'Mug'], 200) } : {}) }
           : f));
+      }
+      if (s.defaultsVersion < 4 && localCurrency() !== 'USD') {
+        const price = squareField('price', fields);
+        if (price && price.type === 'currency' && price.currency === 'USD') fields = fields.map((f) => (f === price ? { ...f, currency: localCurrency() } : f));
       }
       if (s.square.enabled) fields = withSquareFields(fields);
       const next = { ...s, fields, defaultsAdded: true, defaultsVersion: DEFAULTS_VERSION };
