@@ -22,6 +22,9 @@
   const CONNECT_TIP_KEY = 'potteryLog.connectTipDismissed';
   const FIELD_FILTER_KEY = 'potteryLog.fieldFilters'; // chosen values, per device
   const INSTALL_TIP_KEY = 'potteryLog.installTipDismissed';
+  const LOCAL_ONLY_KEY = 'potteryLog.localOnlySnoozed'; // "Remind me later" on the only-in-this-browser warning
+  const LOCAL_ONLY_SNOOZE = 7 * 24 * 3600 * 1000;
+  let pieceCount = 0; // pieces on this device, as of the last list render
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const app = $('#app');
@@ -331,10 +334,48 @@
     return 'Tap ' + ICON_MENU + ' the browser menu, then <strong>Add to Home screen</strong> or <strong>Install app</strong>.';
   }
 
-  /** First-use tip: connect Google Drive. Returns true if shown. */
+  /**
+   * Pieces that aren't synced live only in this browser, which can clear its storage (Safari
+   * removes it from sites not opened for a few weeks unless they're on the home screen).
+   * Shown while there are pieces and Drive isn't connected with a folder. Returns true if shown.
+   */
+  function drawLocalOnlyWarning(tip) {
+    const reconnecting = Drive.configured && Drive.needsReconnect(); // the Reconnect bar says it already
+    const synced = Drive.configured && Drive.isSignedIn() && Drive.getFolder();
+    const snoozed = Date.now() - (Number(store(LOCAL_ONLY_KEY)) || 0) < LOCAL_ONLY_SNOOZE;
+    if (!pieceCount || reconnecting || synced || snoozed) return false;
+    const what = pieceCount === 1 ? 'Your piece is' : 'Your ' + pieceCount + ' pieces are';
+    const ios = phoneKind() === 'ios' && !isInstalled();
+    const body = el('div', { class: 'tip-body' },
+      el('strong', { class: 'tip-title' }, 'Only saved in this browser'),
+      el('p', null, what + ' stored only here. The browser can delete ' + (pieceCount === 1 ? 'it' : 'them') + ' if its data is cleared or, in Safari, after a few weeks unused. ' +
+        (Drive.configured ? 'Connect Google Drive to keep a copy.' : 'Keep a backup somewhere else.')),
+      ios ? el('p', { html: 'Adding the app to your home screen helps too: ' + ICON_SHARE + ' <strong>Share</strong> → <strong>Add to Home Screen</strong>.' }) : null);
+    if (Drive.configured) {
+      body.append(Drive.isSignedIn()
+        ? el('button', { class: 'btn btn-primary btn-small', type: 'button', onclick: () => nav('#/backup') }, 'Choose a Drive folder')
+        : el('button', { class: 'btn btn-primary btn-small', type: 'button', onclick: () => Drive.signIn() }, 'Connect Google Drive'));
+    }
+    tip.classList.add('tip-warn');
+    tip.setAttribute('role', 'alert');
+    tip.replaceChildren(
+      el('img', { src: 'icons/icon-192.png', alt: '' }),
+      body,
+      el('button', {
+        class: 'icon-btn', type: 'button', 'aria-label': 'Remind me later', title: 'Remind me in a week', html: ICON_X,
+        onclick: () => { store(LOCAL_ONLY_KEY, Date.now()); store(CONNECT_TIP_KEY, Date.now()); tip.hidden = true; drawInstallTip(); },
+      }));
+    tip.hidden = false;
+    return true;
+  }
+
+  /** First-use tip: connect Google Drive (or the warning above, once there are pieces). Returns true if shown. */
   function drawConnectTip() {
     const tip = $('#connectTip');
     if (!tip) return false;
+    tip.classList.remove('tip-warn');
+    tip.setAttribute('role', 'note');
+    if (drawLocalOnlyWarning(tip)) return true;
     const show = Drive.configured && !Drive.isSignedIn() && !Drive.needsReconnect() && !store(CONNECT_TIP_KEY);
     tip.hidden = !show;
     if (!show) return false;
@@ -625,6 +666,7 @@
     });
 
     searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); drawCards(); });
+    pieceCount = pieces.length;
     drawInstallTip();
     drawChips();
     drawFieldFilters();
@@ -1299,6 +1341,7 @@
       $('#driveSignedOut').hidden = !Drive.configured || Drive.isSignedIn();
       const reconnect = Drive.needsReconnect();
       $('#reconnectNote').hidden = !reconnect;
+      $('#localOnlyNote').hidden = reconnect;
       $('#signInLabel').textContent = reconnect ? 'Reconnect Google Drive' : 'Sign in with Google';
       $('#driveSignedIn').hidden = !Drive.configured || !Drive.isSignedIn();
       const acct = Drive.getAccount();
