@@ -1057,8 +1057,8 @@
       Settings.learnValues(Object.fromEntries(Object.entries(custom).filter(([id, v]) => v !== before[id])));
       piece.custom = custom;
       // Remember new glazes and clays for the drop-downs (synced with the other settings).
-      const isNew = (v) => !hadNames.has(v.toLowerCase());
-      Settings.learn({ glazes: piece.glazes.filter(isNew), clays: piece.clays.filter(isNew) });
+      const unlisted = (v) => !hadNames.has(v.toLowerCase());
+      Settings.learn({ glazes: piece.glazes.filter(unlisted), clays: piece.clays.filter(unlisted) });
       piece.updatedAt = Date.now();
       await DB.putPiece(piece);
       saved = true;
@@ -1069,8 +1069,10 @@
       PhotoCache.check();
       toast((isNew ? 'Piece added' : 'Saved') + (!navigator.onLine && connected() ? '. It will sync when you\'re back online.' : ''), !navigator.onLine ? 3000 : undefined);
       DB.requestPersistence();
-      if (isNew) nav('#/piece/' + encodeURIComponent(piece.id), true);
-      else backBtn.click();
+      // A new piece's form becomes its page. An edit goes back to the piece it came from, so
+      // Back from there goes home rather than to a second copy of the piece.
+      if (isNew || inAppNavs === 0) nav('#/piece/' + encodeURIComponent(piece.id), true);
+      else history.back();
     });
 
     if (isNew) f.title.focus();
