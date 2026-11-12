@@ -5,7 +5,8 @@
  *
  *   { fields: [{ id, name, type, options?,        type: text | number | currency | date | yesno | choice | link
  *                remember?, values?, currency?,   text fields: remember typed values (values)
- *                aliases? }],                      currency fields: ISO code such as 'USD'
+ *                aliases? }],                      currency fields: default for new prices, e.g. 'CAD'
+ *                                                  (currencyChosen: picked by hand, so it doesn't follow the country)
  *                                                  aliases: earlier names, so old piece.json still reads
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
@@ -15,7 +16,8 @@
  *     updatedAt: ms,
  *     sync: { root, syncedAt } }                 local bookkeeping, never uploaded
  *
- * A piece keeps its values in piece.custom = { fieldId: value }. In Drive they are
+ * A piece keeps its values in piece.custom = { fieldId: value }. A currency value carries its own
+ * currency, { amount: 24.5, currency: 'CAD' }, so changing the default never changes old prices. In Drive they are
  * written by field name ("customFields": { "Kiln": "Big kiln" }) so they read naturally.
  */
 (function () {
@@ -217,25 +219,39 @@
 
   function coerce(f, v) {
     if (f.type === 'yesno') return v === true || v === 'true' || v === 'Yes' || v === 'yes';
-    if (f.type === 'number' || f.type === 'currency') {
-      if (v === '' || v == null) return '';
-      const n = Number(typeof v === 'string' ? v.replace(/[^\d.,-]/g, '').replace(',', '.') : v);
-      if (Number.isNaN(n)) return '';
-      if (f.type === 'number') return n;
-      const k = 10 ** minorDigits(f.currency);
-      return Math.round(n * k) / k;
+    if (f.type === 'currency') {
+      const obj = v && typeof v === 'object';
+      const n = toNumber(obj ? v.amount : v);
+      if (n === '') return '';
+      const currency = obj && isCurrency(v.currency) ? v.currency : pinCurrency(f);
+      const k = 10 ** minorDigits(currency);
+      return { amount: Math.round(n * k) / k, currency };
     }
+    if (v && typeof v === 'object' && 'amount' in v) v = v.amount; // was a currency field
+    if (f.type === 'number') return toNumber(v);
     if (f.type === 'link') return cleanLink(v);
     return v == null ? '' : String(v);
   }
 
+  function toNumber(v) {
+    if (v === '' || v == null) return '';
+    const n = Number(typeof v === 'string' ? v.replace(/[^\d.,-]/g, '').replace(',', '.') : v);
+    return Number.isNaN(n) ? '' : n;
+  }
+  /** The currency for a price saved before prices carried their own: the field's, if it was
+   * picked by hand, otherwise the one where the device is now (when the price was entered). */
+  const pinCurrency = (f) => (f.currencyChosen && isCurrency(f.currency) ? f.currency : localCurrency());
+  /** A currency field's value as { amount, currency }, or null when empty. */
+  function money(f, v) { const m = coerce(f, v); return m === '' ? null : m; }
+
   // Display text → number for currency values, so filter drop-downs sort by amount.
   const amountOf = new Map();
   function formatMoney(f, v) {
-    const n = Number(v);
-    if (Number.isNaN(n)) return String(v);
+    const m = money(f, v);
+    if (!m) return '';
+    const n = m.amount;
     let text;
-    try { text = new Intl.NumberFormat(undefined, { style: 'currency', currency: f.currency || localCurrency() }).format(n); } catch (e) { text = String(n); }
+    try { text = new Intl.NumberFormat(undefined, { style: 'currency', currency: m.currency }).format(n); } catch (e) { text = String(n); }
     if (amountOf.size > 2000) amountOf.clear();
     amountOf.set(text, n);
     return text;
@@ -424,6 +440,21 @@
       return true;
     },
 
+    money,
+    /** Give plain-number prices (saved before prices carried a currency) their currency.
+     * Returns the updated custom values, or null if nothing needed it. */
+    pinPrices(custom) {
+      if (!custom) return null;
+      let out = null;
+      for (const f of load().fields) {
+        const v = custom[f.id];
+        if (f.type !== 'currency' || v === undefined || v === '' || (v && typeof v === 'object')) continue;
+        out = out || { ...custom };
+        const m = coerce(f, v);
+        if (m === '') delete out[f.id]; else out[f.id] = m;
+      }
+      return out;
+    },
     /** What setUp changed Price's currency from and to (once), so the app can say so. */
     takeCurrencyNotice() { const n = currencyNotice; currencyNotice = null; return n; },
 
