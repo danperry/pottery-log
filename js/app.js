@@ -497,7 +497,7 @@
       if (locked()) {
         typing = false;
         row.flush = () => {};
-        row.replaceChildren(el('p', { class: 'muted small' }, 'Set by the recipe below. Remove the recipe to change them.'));
+        row.replaceChildren(el('p', { class: 'muted small' }, 'Set by the glazing process below. Remove it to change them.'));
         return;
       }
       if (typing) {
@@ -600,7 +600,7 @@
 
   /** Choose one of the saved recipes. Resolves with the recipe, or undefined. */
   function chooseRecipe(glazes, live) {
-    return sheet('Choose a recipe', (form, close) => {
+    return sheet('Choose a glazing process', (form, close) => {
       form.append(
         el('div', { class: 'recipe-choices' }, Settings.recipes().map((r) =>
           recipeCard(r, { live, notes: false, match: glazes.length && Settings.sameGlazes(glazes, r.glazes), onclick: () => close(r) }))),
@@ -610,16 +610,16 @@
 
   /** Ask for a new recipe's name and notes. Resolves with { name, notes }, or undefined. */
   function askRecipeDetails(glazes) {
-    return sheet('Save as a recipe', (form, close) => {
-      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku', required: true });
+    return sheet('Save as a glazing process', (form, close) => {
+      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku, dipped', required: true });
       const notes = el('textarea', { rows: '5', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
       form.append(
         el('p', { class: 'muted small' }, 'Glazes: ' + glazes.join(', ')),
-        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('label', { class: 'field' }, el('span', null, 'Name'), name),
         el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
         el('div', { class: 'form-actions ask-actions' },
           el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
-          el('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Save recipe')));
+          el('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Save glazing process')));
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         try { close({ name: Settings.checkRecipeName(name.value), notes: notes.value.trim() }); } catch (err) { toast(err.message); name.focus(); }
@@ -925,7 +925,7 @@
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
     const recipe = Settings.recipe(p.recipeId);
     if (recipe) {
-      add('Recipe', el('div', { class: 'recipe-fact' }, recipeThumb(recipe),
+      add('Glazing process', el('div', { class: 'recipe-fact' }, recipeThumb(recipe),
         el('div', { class: 'recipe-meta' }, el('strong', null, recipe.name), recipe.notes ? el('p', { class: 'recipe-notes' }, recipe.notes) : null)));
     }
     const fire = firingsOf(p);
@@ -1040,14 +1040,14 @@
           el('div', { class: 'recipe-actions' }, el('button', {
             type: 'button', class: 'btn btn-ghost btn-small',
             onclick: () => { delete piece.recipeId; glazePick.redraw(); drawRecipe(); },
-          }, 'Remove recipe'),
-          r === pendingRecipe ? el('p', { class: 'muted small' }, 'The recipe is saved when you save the piece.') : null));
+          }, 'Remove glazing process'),
+          r === pendingRecipe ? el('p', { class: 'muted small' }, 'The glazing process is saved when you save the piece.') : null));
         return;
       }
       const parts = [];
-      if (Settings.recipes().length) parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: pickRecipe }, 'Choose a recipe…'));
-      if (piece.glazes.length >= 2) parts.push(el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: saveAsRecipe }, 'Save glazes as a recipe'));
-      if (!parts.length) parts.push(el('p', { class: 'muted small' }, 'Add two or more glazes to save them as a recipe.'));
+      if (Settings.recipes().length) parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: pickRecipe }, 'Choose a glazing process…'));
+      if (piece.glazes.length >= 2) parts.push(el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: saveAsRecipe }, 'Save as a glazing process'));
+      if (!parts.length) parts.push(el('p', { class: 'muted small' }, 'Add two or more glazes to save them as a glazing process.'));
       box.replaceChildren(el('div', { class: 'recipe-actions' }, ...parts));
     }
     async function pickRecipe() {
@@ -1056,8 +1056,8 @@
       if (!r) return;
       if (piece.glazes.length && !Settings.sameGlazes(piece.glazes, r.glazes) && !(await ask({
         title: 'Change the glazes to “' + r.name + '”?',
-        message: ['This piece has ' + piece.glazes.join(', ') + '.', 'Applying the recipe changes its glazes to ' + r.glazes.join(', ') + '.'],
-        confirm: 'Apply recipe',
+        message: ['This piece has ' + piece.glazes.join(', ') + '.', 'Applying the glazing process changes its glazes to ' + r.glazes.join(', ') + '.'],
+        confirm: 'Apply',
       }))) return;
       piece.glazes.splice(0, piece.glazes.length, ...r.glazes);
       piece.recipeId = r.id;
@@ -1496,7 +1496,7 @@
     return sheet('Thumbnail for “' + r.name + '”', async (form, close) => {
       const box = el('div', { class: 'photo-pick' });
       form.append(
-        el('p', { class: 'muted small' }, 'Photos of the pieces that use this recipe.'),
+        el('p', { class: 'muted small' }, 'Photos of the pieces that use this glazing process.'),
         box,
         el('div', { class: 'form-actions ask-actions' }, el('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, 'Cancel')));
       const origin = r.pieceId ? await DB.getPiece(r.pieceId) : null;
@@ -1540,7 +1540,7 @@
         }
       }
       if (!pieces.length || (!any && !box.querySelector('.photo-grid:not(:empty)'))) {
-        box.append(el('p', { class: 'muted small' }, pieces.length ? 'None of these pieces has photos yet.' : 'No piece uses this recipe yet. Apply it to a piece, then pick one of its photos here.'));
+        box.append(el('p', { class: 'muted small' }, pieces.length ? 'None of these pieces has photos yet.' : 'No piece uses this glazing process yet. Apply it to a piece, then pick one of its photos here.'));
       }
     });
   }
@@ -1552,7 +1552,7 @@
     const stubs = using.filter((p) => p.stub);
     if (stubs.length) {
       if (!connected() || !navigator.onLine) {
-        throw new Error((stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' using this recipe ' + (stubs.length === 1 ? 'hasn\'t' : 'haven\'t') +
+        throw new Error((stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' using this glazing process ' + (stubs.length === 1 ? 'hasn\'t' : 'haven\'t') +
           ' been opened on this device yet. Connect to Google Drive to change its glazes.');
       }
       toast('Loading ' + (stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' from Google Drive…', 2000);
@@ -1859,20 +1859,20 @@
       $('#recipeAddBox').replaceChildren(el('button', {
         type: 'button', class: 'btn btn-secondary btn-small',
         onclick: () => { recipeAdding = true; openRecipeAdd(); },
-      }, 'New recipe'));
+      }, 'New glazing process'));
     }
     function openRecipeAdd() {
       const glazes = [];
-      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku' });
+      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku, dipped' });
       const notes = el('textarea', { rows: '4', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
       const pickBox = el('div', { class: 'tag-picker' });
       const form = el('form', { class: 'cf-edit' },
-        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('label', { class: 'field' }, el('span', null, 'Name'), name),
         el('div', { class: 'field' }, el('span', null, 'Glazes'), pickBox),
         el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
-        el('p', { class: 'muted small' }, 'The glazes can\'t be changed once the recipe is saved. Its thumbnail can be picked from photos of the pieces that use it.'),
+        el('p', { class: 'muted small' }, 'Its thumbnail can be picked later from photos of the pieces that use it.'),
         el('div', { class: 'cf-edit-actions' },
-          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save recipe'),
+          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save glazing process'),
           el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => { recipeAdding = false; drawRecipeAdd(); } }, 'Cancel')));
       const pick = tagPicker(pickBox, glazes, 'glaze');
       form.addEventListener('submit', (e) => {
@@ -1928,10 +1928,10 @@
               openGlazes();
             },
           }, 'Change glazes')));
-        glazeNote.textContent = (using.length === 1 ? '1 piece uses' : using.length + ' pieces use') + ' this recipe, so changing its glazes changes ' + (using.length === 1 ? 'that piece' : 'those pieces') + ' too.';
+        glazeNote.textContent = (using.length === 1 ? '1 piece uses' : using.length + ' pieces use') + ' this glazing process, so changing its glazes changes ' + (using.length === 1 ? 'that piece' : 'those pieces') + ' too.';
       });
       const form = el('form', { class: 'cf-edit' },
-        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('label', { class: 'field' }, el('span', null, 'Name'), name),
         el('div', { class: 'field' }, el('span', null, 'Glazes'), glazeBox, glazeNote),
         el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
         el('div', { class: 'field' }, el('span', null, 'Thumbnail'), preview),

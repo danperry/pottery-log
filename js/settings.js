@@ -122,7 +122,7 @@
     { id: 'clayBody', name: 'Clay body' },
     { id: 'method', name: 'Forming method' },
     { id: 'glazes', name: 'Glaze' },
-    { id: 'recipe', name: 'Recipe' },
+    { id: 'recipe', name: 'Glazing process' },
     { id: 'bisqueFiringType', name: 'Bisque firing type' },
     { id: 'bisqueCone', name: 'Bisque cone' },
     { id: 'glazeFiringType', name: 'Glaze firing type' },
@@ -349,7 +349,7 @@
     return new Set(SQUARE_FIELDS.map((d) => squareField(d.role, s.fields)).filter(Boolean).map((f) => f.id));
   }
 
-  const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'recipe', 'cone', 'firing type', 'forming method'];
+  const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'recipe', 'glazing process', 'cone', 'firing type', 'forming method'];
   function checkName(name, exceptId) {
     name = String(name || '').trim().slice(0, 60);
     if (!name) throw new Error('Give the field a name');
@@ -578,9 +578,9 @@
     recipe: (id) => (id ? load().recipes.find((r) => r.id === id && !r.deleted) || null : null),
     checkRecipeName(name, exceptId) {
       name = String(name || '').trim().slice(0, 80);
-      if (!name) throw new Error('Give the recipe a name');
+      if (!name) throw new Error('Give the glazing process a name');
       if (this.recipes().some((r) => r.id !== exceptId && r.name.toLowerCase() === name.toLowerCase())) {
-        throw new Error('There is already a recipe called “' + name + '”');
+        throw new Error('There is already a glazing process called “' + name + '”');
       }
       return name;
     },
@@ -599,7 +599,7 @@
      * The app updates the pieces using it when the glazes change. */
     editRecipe(id, changes) {
       const old = this.recipe(id);
-      if (!old) throw new Error('That recipe no longer exists');
+      if (!old) throw new Error('That glazing process no longer exists');
       const next = { ...old, updatedAt: Date.now() };
       if ('name' in changes) next.name = this.checkRecipeName(changes.name, id);
       if ('notes' in changes) next.notes = changes.notes;

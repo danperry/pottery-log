@@ -59,7 +59,7 @@
       formingMethod: METHODS[p.method] || '',
       glazes: p.glazes || [],
       // The glaze recipe applied (its glazes are the ones above; its notes are in Settings).
-      ...(p.recipeId ? { recipe: (Settings.recipe(p.recipeId) || {}).name || '', recipeId: p.recipeId } : {}),
+      ...(p.recipeId ? { glazingProcess: (Settings.recipe(p.recipeId) || {}).name || '', recipeId: p.recipeId } : {}),
       bisqueFiring: fire.bisque,
       glazeFiring: fire.glaze,
       dates: {
@@ -158,7 +158,7 @@
 
   // Fields merged one by one. Photos are merged as a set (see mergePhotos).
   const MERGE_FIELDS = {
-    title: 'Title', stage: 'Stage', clays: 'Clay bodies', method: 'Forming method', glazes: 'Glazes', recipeId: 'Recipe',
+    title: 'Title', stage: 'Stage', clays: 'Clay bodies', method: 'Forming method', glazes: 'Glazes', recipeId: 'Glazing process',
     bisqueFiringType: 'Bisque firing type', bisqueCone: 'Bisque cone',
     glazeFiringType: 'Glaze firing type', glazeCone: 'Glaze cone',
     dateMade: 'Made', dateBisque: 'Bisque fired', dateGlazed: 'Glaze fired', dateDone: 'Finished',
