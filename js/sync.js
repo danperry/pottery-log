@@ -58,8 +58,8 @@
       clays: claysOf(p),
       formingMethod: METHODS[p.method] || '',
       glazes: p.glazes || [],
-      // The glaze recipe applied (its glazes are the ones above; its notes are in Settings).
-      ...(p.recipeId ? { recipe: (Settings.recipe(p.recipeId) || {}).name || '', recipeId: p.recipeId } : {}),
+      // The glazing process applied (its glazes are the ones above; its notes are in Settings).
+      ...(p.glazingProcessId ? { glazingProcess: (Settings.glazingProcess(p.glazingProcessId) || {}).name || '', glazingProcessId: p.glazingProcessId } : {}),
       bisqueFiring: fire.bisque,
       glazeFiring: fire.glaze,
       dates: {
@@ -99,7 +99,7 @@
       clays: Array.isArray(j.clays) ? j.clays.map(str).filter(Boolean) : (str(j.clayBody) ? [str(j.clayBody)] : []),
       method: fromLabel(METHODS, j.formingMethod),
       glazes: Array.isArray(j.glazes) ? j.glazes.map(str).filter(Boolean) : [],
-      recipeId: str(j.recipeId) || undefined,
+      glazingProcessId: str(j.glazingProcessId) || undefined,
       bisqueFiringType: str(b.type),
       bisqueCone: str(b.cone),
       glazeFiringType: str(g.type),
@@ -158,7 +158,7 @@
 
   // Fields merged one by one. Photos are merged as a set (see mergePhotos).
   const MERGE_FIELDS = {
-    title: 'Title', stage: 'Stage', clays: 'Clay bodies', method: 'Forming method', glazes: 'Glazes', recipeId: 'Recipe',
+    title: 'Title', stage: 'Stage', clays: 'Clay bodies', method: 'Forming method', glazes: 'Glazes', glazingProcessId: 'Glazing process',
     bisqueFiringType: 'Bisque firing type', bisqueCone: 'Bisque cone',
     glazeFiringType: 'Glaze firing type', glazeCone: 'Glaze cone',
     dateMade: 'Made', dateBisque: 'Bisque fired', dateGlazed: 'Glaze fired', dateDone: 'Finished',
@@ -170,7 +170,7 @@
     const fire = firingsOf(p);
     const snap = {
       title: p.title || 'Untitled', stage: p.stage || 'greenware', clays: claysOf(p), method: p.method || '',
-      glazes: p.glazes || [], recipeId: p.recipeId || '',
+      glazes: p.glazes || [], glazingProcessId: p.glazingProcessId || '',
       bisqueFiringType: fire.bisque.type, bisqueCone: fire.bisque.cone,
       glazeFiringType: fire.glaze.type, glazeCone: fire.glaze.cone,
       dateMade: p.dateMade || '', dateBisque: p.dateBisque || '', dateGlazed: p.dateGlazed || '', dateDone: p.dateDone || '',
@@ -237,7 +237,7 @@
       : mergePhotos(lSnap.photoIds, rSnap.photoIds, b.photoIds, localWins);
     if (out.coverPhotoId && !out.photoIds.includes(out.coverPhotoId)) out.coverPhotoId = '';
     out.coverPhotoId = out.coverPhotoId || undefined;
-    out.recipeId = out.recipeId || undefined;
+    out.glazingProcessId = out.glazingProcessId || undefined;
     return { fields: out, conflicts };
   }
 
@@ -430,7 +430,7 @@
     const rsAt = rs ? ms(rs.savedAt) : 0;
     const local = Settings.get();
     if (rs && rsAt > local.updatedAt) { Settings.applyRemote(rs, rootId); settingsChange = 'pulled'; }
-    else if ((rs && Settings.absorbRecipes(rs.recipes)) || Settings.isDirty(rootId)) settingsChange = 'pushed';
+    else if ((rs && Settings.absorbGlazingProcesses(rs.glazingProcesses)) || Settings.isDirty(rootId)) settingsChange = 'pushed';
     else if (rs && rsAt === local.updatedAt) Settings.markSynced(rootId, rsAt);
 
     // What Drive has: index entries, overridden by any newer piece.json (the index can lag behind).
