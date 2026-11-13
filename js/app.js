@@ -820,7 +820,7 @@
       const bar = $('#selectBar');
       bar.hidden = !selectMode;
       const n = selected.size;
-      $('#selectCount').textContent = n ? n + ' selected' : 'Tap pieces to select them';
+      $('#selectCount').textContent = n ? n + ' selected' : 'Tap to select';
       $('#editSelectedBtn').disabled = !n;
       $('#editSelectedBtn').textContent = n > 1 ? 'Edit ' + n : 'Edit';
       const sell = $('#sellSelectedBtn');
@@ -831,6 +831,7 @@
       if (selected.size === 1) nav('#/edit/' + encodeURIComponent([...selected][0]));
       else if (selected.size) nav('#/bulk');
     });
+    $('#exitSelectBtn').addEventListener('click', stopSelecting);
     $('#sellSelectedBtn').addEventListener('click', () => sellSelected(pieces.filter((p) => selected.has(p.id))));
     const onEsc = (e) => { if (e.key === 'Escape' && selectMode && !document.querySelector('dialog[open]')) stopSelecting(); };
     document.addEventListener('keydown', onEsc);

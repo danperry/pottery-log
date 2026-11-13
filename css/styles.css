@@ -505,7 +505,10 @@ button.process-card.match { box-shadow: inset 4px 0 0 var(--accent); }
   background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 14px rgba(60, 40, 20, .08);
 }
 .select-bar[hidden] { display: none; }
-.select-count { font-weight: 600; font-size: .95rem; }
+.select-count { flex: 1; min-width: 0; font-weight: 600; font-size: .95rem; }
+.select-exit { flex: none; width: 40px; height: 40px; margin: -4px 0 -4px -8px; color: var(--muted); }
+.select-exit svg { width: 22px; height: 22px; }
+.select-exit:active { background: var(--border); }
 .select-actions { display: flex; gap: 8px; }
 .select-actions .btn-square { width: auto; margin: 0; }
 .selecting ~ .toast, body:has(.select-bar:not([hidden])) .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
