@@ -234,7 +234,7 @@ A glazing process is a set of glazes plus notes on how you apply them (not a rec
 
 Under **Settings → Glazing processes** you can change a process's name, notes, glazes and thumbnail, and add new ones. The thumbnail defaults to the last photo of the piece it was saved from; **Choose thumbnail** shows the photos of every piece that uses it (they load as you scroll). Its glazes can be edited freely while no piece uses it. Once pieces use it, **Change glazes** first says how many pieces will be updated; saving then changes the glazes on all of them (pieces synced from another device are loaded from Drive first, so this needs a connection). One that no piece uses can be removed.
 
-They're stored under `"settings"` → `"recipes"` in `pottery-log-index.json` (the internal name). Unlike the other settings they're merged one by one, so one saved on one device is never lost to a newer settings save from another. A piece using one has `"glazingProcess"` (its name) and `"recipeId"` in `piece.json`.
+They're stored under `"settings"` → `"glazingProcesses"` in `pottery-log-index.json`. Unlike the other settings they're merged one by one, so one saved on one device is never lost to a newer settings save from another. A piece using one has `"glazingProcess"` (its name) and `"glazingProcessId"` in `piece.json`.
 
 The edit form has a **Bisque** section and a **Glaze** section, each with its own Firing type and Cone. They're saved separately as `"bisqueFiring"` and `"glazeFiring"`. A piece saved before this change had one `"firing"`; it's read as the glaze firing.
 

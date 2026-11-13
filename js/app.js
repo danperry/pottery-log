@@ -470,7 +470,7 @@
   /**
    * Chosen values as tags, plus a drop-down of remembered ones and a "New…" option to type
    * one. kind is 'glaze' or 'clay'.
-   * opts.locked(): true while the values can't be changed (glazes set by a recipe).
+   * opts.locked(): true while the values can't be changed (glazes set by a glazing process).
    * opts.onChange(): after a value is added or removed.
    * Returns { flush() } to add anything typed but not yet added, and redraw().
    */
@@ -528,9 +528,9 @@
     return { flush: () => row.flush(), redraw: draw };
   }
 
-  /* ---------- glaze recipes ---------- */
+  /* ---------- glazing processes ---------- */
 
-  const recipeName = (p) => { const r = p && Settings.recipe(p.recipeId); return r ? r.name : ''; };
+  const glazingProcessName = (p) => { const r = p && Settings.glazingProcess(p.glazingProcessId); return r ? r.name : ''; };
 
   /** A photo by its piece and id, downloaded from Drive if needed (fileId saves looking it up). */
   async function refPhotoUrl(ref, live) {
@@ -551,8 +551,8 @@
     return u;
   }
 
-  /** The default thumbnail: the last photo of the piece the recipe was saved from. */
-  async function recipeDefaultRef(r, live) {
+  /** The default thumbnail: the last photo of the piece the glazing process was saved from. */
+  async function glazingProcessDefaultRef(r, live) {
     if (!r.pieceId) return null;
     const p = live && live.id === r.pieceId ? live : await DB.getPiece(r.pieceId);
     if (!p || p.deleted) return null;
@@ -561,26 +561,26 @@
     return pid ? { pieceId: p.id, photoId: pid } : null;
   }
 
-  /** The recipe's thumbnail: the one picked in Settings, or else the default. live: a piece being edited. */
-  async function recipeThumbUrl(r, live) {
+  /** The glazing process's thumbnail: the one picked in Settings, or else the default. live: a piece being edited. */
+  async function glazingProcessThumbUrl(r, live) {
     if (r.thumb) { const u = await refPhotoUrl(r.thumb, live).catch(() => null); if (u) return u; }
-    const ref = await recipeDefaultRef(r, live);
+    const ref = await glazingProcessDefaultRef(r, live);
     return ref ? refPhotoUrl(ref, live).catch(() => null) : null;
   }
 
-  function recipeThumb(r, { live, big } = {}) {
-    const box = el('div', { class: 'recipe-thumb' + (big ? ' big' : ''), html: ICON_POT });
-    recipeThumbUrl(r, live).then((u) => { if (u) box.replaceChildren(el('img', { src: u, alt: '' })); });
+  function glazingProcessThumb(r, { live, big } = {}) {
+    const box = el('div', { class: 'process-thumb' + (big ? ' big' : ''), html: ICON_POT });
+    glazingProcessThumbUrl(r, live).then((u) => { if (u) box.replaceChildren(el('img', { src: u, alt: '' })); });
     return box;
   }
 
-  function recipeCard(r, opts = {}) {
-    return el(opts.onclick ? 'button' : 'div', { class: 'recipe-card' + (opts.match ? ' match' : ''), type: opts.onclick ? 'button' : null, onclick: opts.onclick || null },
-      recipeThumb(r, opts),
-      el('div', { class: 'recipe-meta' },
+  function glazingProcessCard(r, opts = {}) {
+    return el(opts.onclick ? 'button' : 'div', { class: 'process-card' + (opts.match ? ' match' : ''), type: opts.onclick ? 'button' : null, onclick: opts.onclick || null },
+      glazingProcessThumb(r, opts),
+      el('div', { class: 'process-meta' },
         el('strong', null, r.name),
         el('span', { class: 'sub' }, r.glazes.join(', ') + (opts.match ? ' · same glazes as this piece' : '')),
-        opts.notes !== false && r.notes ? el('p', { class: 'recipe-notes' }, r.notes) : null));
+        opts.notes !== false && r.notes ? el('p', { class: 'process-notes' }, r.notes) : null));
   }
 
   /** A pop-up sheet with a form. build(form, close) fills it; resolves with what close() was given. */
@@ -588,7 +588,7 @@
     return new Promise((resolve) => {
       const titleId = 'sheet-' + Date.now();
       const form = el('form', { method: 'dialog' }, el('h2', { id: titleId }, title));
-      const dlg = el('dialog', { class: 'sheet recipe-sheet', 'aria-labelledby': titleId }, form);
+      const dlg = el('dialog', { class: 'sheet process-sheet', 'aria-labelledby': titleId }, form);
       let result;
       const close = (v) => { result = v; dlg.close(); };
       dlg.addEventListener('close', () => { resolve(result); dlg.remove(); });
@@ -598,18 +598,18 @@
     });
   }
 
-  /** Choose one of the saved recipes. Resolves with the recipe, or undefined. */
-  function chooseRecipe(glazes, live) {
+  /** Choose one of the saved glazing processes. Resolves with the glazing process, or undefined. */
+  function chooseGlazingProcess(glazes, live) {
     return sheet('Choose a glazing process', (form, close) => {
       form.append(
-        el('div', { class: 'recipe-choices' }, Settings.recipes().map((r) =>
-          recipeCard(r, { live, notes: false, match: glazes.length && Settings.sameGlazes(glazes, r.glazes), onclick: () => close(r) }))),
+        el('div', { class: 'process-choices' }, Settings.glazingProcesses().map((r) =>
+          glazingProcessCard(r, { live, notes: false, match: glazes.length && Settings.sameGlazes(glazes, r.glazes), onclick: () => close(r) }))),
         el('div', { class: 'form-actions ask-actions' }, el('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, 'Cancel')));
     });
   }
 
-  /** Ask for a new recipe's name and notes. Resolves with { name, notes }, or undefined. */
-  function askRecipeDetails(glazes) {
+  /** Ask for a new glazing process's name and notes. Resolves with { name, notes }, or undefined. */
+  function askGlazingProcessDetails(glazes) {
     return sheet('Save as a glazing process', (form, close) => {
       const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku, dipped', required: true });
       const notes = el('textarea', { rows: '5', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
@@ -622,7 +622,7 @@
           el('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Save glazing process')));
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        try { close({ name: Settings.checkRecipeName(name.value), notes: notes.value.trim() }); } catch (err) { toast(err.message); name.focus(); }
+        try { close({ name: Settings.checkGlazingProcessName(name.value), notes: notes.value.trim() }); } catch (err) { toast(err.message); name.focus(); }
       });
       setTimeout(() => name.focus(), 0);
     });
@@ -637,7 +637,7 @@
   /** The value(s) of a field on a piece, as display strings. */
   function fieldValues(p, id) {
     if (id === 'glazes') return p.glazes || [];
-    if (id === 'recipe') { const n = recipeName(p); return n ? [n] : []; }
+    if (id === 'glazingProcess') { const n = glazingProcessName(p); return n ? [n] : []; }
     if (id === 'method') return p.method ? [METHOD_LABEL[p.method] || p.method] : [];
     if (id === 'clayBody') return claysOf(p);
     if (id === 'bisqueCone' || id === 'glazeCone') { const c = firingsOf(p)[id]; return c ? [coneLabel(c)] : []; }
@@ -694,7 +694,7 @@
         if (want === NONE ? have.length : !have.includes(want)) return false;
       }
       if (!query) return true;
-      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '), recipeName(p),
+      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '), glazingProcessName(p),
         ...['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone'].flatMap((id) => fieldValues(p, id)), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
       return query.split(/\s+/).every((w) => hay.includes(w));
     }
@@ -923,10 +923,10 @@
     if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.join(', '));
     add('Forming', METHOD_LABEL[p.method]);
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
-    const recipe = Settings.recipe(p.recipeId);
-    if (recipe) {
-      add('Glazing process', el('div', { class: 'recipe-fact' }, recipeThumb(recipe),
-        el('div', { class: 'recipe-meta' }, el('strong', null, recipe.name), recipe.notes ? el('p', { class: 'recipe-notes' }, recipe.notes) : null)));
+    const glazingProcess = Settings.glazingProcess(p.glazingProcessId);
+    if (glazingProcess) {
+      add('Glazing process', el('div', { class: 'process-fact' }, glazingProcessThumb(glazingProcess),
+        el('div', { class: 'process-meta' }, el('strong', null, glazingProcess.name), glazingProcess.notes ? el('p', { class: 'process-notes' }, glazingProcess.notes) : null)));
     }
     const fire = firingsOf(p);
     add('Bisque firing', [fire.bisqueFiringType, coneLabel(fire.bisqueCone)].filter(Boolean).join(', '));
@@ -1025,34 +1025,34 @@
     const hadNames = new Set([...piece.clays, ...piece.glazes].map((v) => v.toLowerCase())); // removed from a list stays removed
     const clayPick = tagPicker($('#clayPicker'), piece.clays, 'clay');
 
-    // Recipe: a saved set of glazes. While one is applied, the glazes are the recipe's and can't
-    // be changed. One saved here ("Save as a recipe") is created when the piece is saved.
-    let pendingRecipe = null;
-    const recipeOf = (rid) => (rid && pendingRecipe && pendingRecipe.id === rid ? pendingRecipe : Settings.recipe(rid));
-    if (piece.recipeId && !recipeOf(piece.recipeId)) delete piece.recipeId; // removed on another device
-    const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze', { locked: () => !!recipeOf(piece.recipeId), onChange: drawRecipe });
-    function drawRecipe() {
-      const box = $('#recipeBox');
+    // Glazing process: a saved set of glazes. While one is applied, the glazes are the glazing process's and can't
+    // be changed. One saved here ("Save as a glazing process") is created when the piece is saved.
+    let pendingGlazingProcess = null;
+    const glazingProcessOf = (rid) => (rid && pendingGlazingProcess && pendingGlazingProcess.id === rid ? pendingGlazingProcess : Settings.glazingProcess(rid));
+    if (piece.glazingProcessId && !glazingProcessOf(piece.glazingProcessId)) delete piece.glazingProcessId; // removed on another device
+    const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze', { locked: () => !!glazingProcessOf(piece.glazingProcessId), onChange: drawGlazingProcess });
+    function drawGlazingProcess() {
+      const box = $('#glazingProcessBox');
       if (!box) return;
-      const r = recipeOf(piece.recipeId);
+      const r = glazingProcessOf(piece.glazingProcessId);
       if (r) {
-        box.replaceChildren(recipeCard(r, { live: piece }),
-          el('div', { class: 'recipe-actions' }, el('button', {
+        box.replaceChildren(glazingProcessCard(r, { live: piece }),
+          el('div', { class: 'process-actions' }, el('button', {
             type: 'button', class: 'btn btn-ghost btn-small',
-            onclick: () => { delete piece.recipeId; glazePick.redraw(); drawRecipe(); },
+            onclick: () => { delete piece.glazingProcessId; glazePick.redraw(); drawGlazingProcess(); },
           }, 'Remove glazing process'),
-          r === pendingRecipe ? el('p', { class: 'muted small' }, 'The glazing process is saved when you save the piece.') : null));
+          r === pendingGlazingProcess ? el('p', { class: 'muted small' }, 'The glazing process is saved when you save the piece.') : null));
         return;
       }
       const parts = [];
-      if (Settings.recipes().length) parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: pickRecipe }, 'Choose a glazing process…'));
-      if (piece.glazes.length >= 2) parts.push(el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: saveAsRecipe }, 'Save as a glazing process'));
+      if (Settings.glazingProcesses().length) parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: pickGlazingProcess }, 'Choose a glazing process…'));
+      if (piece.glazes.length >= 2) parts.push(el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: saveAsGlazingProcess }, 'Save as a glazing process'));
       if (!parts.length) parts.push(el('p', { class: 'muted small' }, 'Add two or more glazes to save them as a glazing process.'));
-      box.replaceChildren(el('div', { class: 'recipe-actions' }, ...parts));
+      box.replaceChildren(el('div', { class: 'process-actions' }, ...parts));
     }
-    async function pickRecipe() {
+    async function pickGlazingProcess() {
       glazePick.flush();
-      const r = await chooseRecipe(piece.glazes, piece);
+      const r = await chooseGlazingProcess(piece.glazes, piece);
       if (!r) return;
       if (piece.glazes.length && !Settings.sameGlazes(piece.glazes, r.glazes) && !(await ask({
         title: 'Change the glazes to “' + r.name + '”?',
@@ -1060,21 +1060,21 @@
         confirm: 'Apply',
       }))) return;
       piece.glazes.splice(0, piece.glazes.length, ...r.glazes);
-      piece.recipeId = r.id;
+      piece.glazingProcessId = r.id;
       glazePick.redraw();
-      drawRecipe();
+      drawGlazingProcess();
     }
-    async function saveAsRecipe() {
+    async function saveAsGlazingProcess() {
       glazePick.flush();
-      if (piece.glazes.length < 2) { drawRecipe(); return; }
-      const d = await askRecipeDetails(piece.glazes);
+      if (piece.glazes.length < 2) { drawGlazingProcess(); return; }
+      const d = await askGlazingProcessDetails(piece.glazes);
       if (!d) return;
-      pendingRecipe = { id: 'r-' + DB.uid(), name: d.name, notes: d.notes, glazes: [...piece.glazes], pieceId: piece.id };
-      piece.recipeId = pendingRecipe.id;
+      pendingGlazingProcess = { id: 'gp-' + DB.uid(), name: d.name, notes: d.notes, glazes: [...piece.glazes], pieceId: piece.id };
+      piece.glazingProcessId = pendingGlazingProcess.id;
       glazePick.redraw();
-      drawRecipe();
+      drawGlazingProcess();
     }
-    drawRecipe();
+    drawGlazingProcess();
 
     // Bisque and glaze firing: the same two drop-downs in each section.
     Object.assign(piece, firingsOf(piece));
@@ -1210,10 +1210,10 @@
       clayPick.flush(); glazePick.flush();
       const title = f.title.value.trim();
       if (!title) { toast('Give the piece a title'); f.title.focus(); return; }
-      if (pendingRecipe && piece.recipeId === pendingRecipe.id) {
-        try { Settings.addRecipe(pendingRecipe); pendingRecipe = null; } catch (err) { toast(err.message, 4000); return; }
+      if (pendingGlazingProcess && piece.glazingProcessId === pendingGlazingProcess.id) {
+        try { Settings.addGlazingProcess(pendingGlazingProcess); pendingGlazingProcess = null; } catch (err) { toast(err.message, 4000); return; }
       }
-      if (!piece.recipeId || !Settings.recipe(piece.recipeId)) delete piece.recipeId;
+      if (!piece.glazingProcessId || !Settings.glazingProcess(piece.glazingProcessId)) delete piece.glazingProcessId;
       piece.title = title;
       piece.method = (form.querySelector('input[name=method]:checked') || {}).value || '';
       for (const k of ['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone']) piece[k] = f[k].value;
@@ -1488,11 +1488,11 @@
   }
 
   /**
-   * Pick a recipe's thumbnail from the photos of every piece that uses it (and the piece it was
+   * Pick a glazing process's thumbnail from the photos of every piece that uses it (and the piece it was
    * saved from). Photos load only as they scroll into view, a few at a time, so a big log stays
    * quick. Resolves with { pieceId, photoId, fileId }, null for the default, or undefined.
    */
-  function pickRecipePhoto(r, current) {
+  function pickGlazingProcessPhoto(r, current) {
     return sheet('Thumbnail for “' + r.name + '”', async (form, close) => {
       const box = el('div', { class: 'photo-pick' });
       form.append(
@@ -1503,7 +1503,7 @@
       box.append(el('button', {
         type: 'button', class: 'btn btn-ghost btn-small default-pick', 'aria-pressed': String(!current), onclick: () => close(null),
       }, origin && !origin.deleted ? 'Default: last photo of “' + (origin.title || 'Untitled') + '”' : 'Default (no photo)'));
-      const pieces = (await DB.allPieces()).filter((p) => !p.deleted && (p.recipeId === r.id || p.id === r.pieceId))
+      const pieces = (await DB.allPieces()).filter((p) => !p.deleted && (p.glazingProcessId === r.id || p.id === r.pieceId))
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       const seen = new IntersectionObserver((entries) => {
         for (const e of entries) {
@@ -1545,10 +1545,10 @@
     });
   }
 
-  /** Give every piece using a recipe its new glazes. Pieces synced from another device are
+  /** Give every piece using a glazing process its new glazes. Pieces synced from another device are
    * loaded first, so the change isn't lost when they upload. Nothing changes unless all can be. */
-  async function setRecipeGlazes(recipeId, glazes) {
-    let using = (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === recipeId);
+  async function setGlazingProcessGlazes(glazingProcessId, glazes) {
+    let using = (await DB.allPieces()).filter((p) => !p.deleted && p.glazingProcessId === glazingProcessId);
     const stubs = using.filter((p) => p.stub);
     if (stubs.length) {
       if (!connected() || !navigator.onLine) {
@@ -1557,7 +1557,7 @@
       }
       toast('Loading ' + (stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' from Google Drive…', 2000);
       for (const p of stubs) await loadDetails(p.id);
-      using = (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === recipeId);
+      using = (await DB.allPieces()).filter((p) => !p.deleted && p.glazingProcessId === glazingProcessId);
     }
     const now = Date.now();
     for (const p of using) await DB.putPiece({ ...p, glazes: [...glazes], updatedAt: now });
@@ -1823,45 +1823,45 @@
     }
     drawLists();
 
-    // Glaze recipes: name, notes and thumbnail can change; the glazes never do.
-    let recipeAdding = false;
-    async function drawRecipes() {
+    // Glazing processes: name, notes, glazes and thumbnail can all change.
+    let glazingProcessAdding = false;
+    async function drawGlazingProcesses() {
       const all = (await DB.allPieces()).filter((p) => !p.deleted);
-      const listEl = $('#recipeList');
+      const listEl = $('#glazingProcessList');
       if (!listEl) return;
-      const recipes = Settings.recipes();
-      const uses = (r) => all.filter((p) => p.recipeId === r.id).length;
-      listEl.replaceChildren(...recipes.map((r) => {
+      const glazingProcesses = Settings.glazingProcesses();
+      const uses = (r) => all.filter((p) => p.glazingProcessId === r.id).length;
+      listEl.replaceChildren(...glazingProcesses.map((r) => {
         const n = uses(r);
         const li = el('li', { 'data-id': r.id },
-          recipeThumb(r),
+          glazingProcessThumb(r),
           el('div', { class: 'cf-text' },
             el('span', { class: 'cf-name' }, r.name),
             el('span', { class: 'cf-meta' }, r.glazes.join(', ') + ' · ' + (n ? n + (n === 1 ? ' piece' : ' pieces') : 'not used yet'))),
-          el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + r.name, html: ICON_EDIT, onclick: () => editRecipe(li, r) }),
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + r.name, html: ICON_EDIT, onclick: () => editGlazingProcess(li, r) }),
           n ? el('span', { class: 'icon-btn-space', 'aria-hidden': 'true' }) : el('button', {
             class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + r.name, html: ICON_X,
             onclick: async () => {
               if (!(await ask({ title: 'Remove “' + r.name + '”?', message: 'No piece uses it. It is removed here and on your other devices.', confirm: 'Remove', danger: true }))) return;
-              Settings.removeRecipe(r.id);
-              drawRecipes();
+              Settings.removeGlazingProcess(r.id);
+              drawGlazingProcesses();
               markChanged();
             },
           }));
         return li;
       }));
-      listEl.hidden = !recipes.length;
-      $('#recipeEmpty').hidden = !!recipes.length;
-      if (!recipeAdding) drawRecipeAdd();
+      listEl.hidden = !glazingProcesses.length;
+      $('#glazingProcessEmpty').hidden = !!glazingProcesses.length;
+      if (!glazingProcessAdding) drawGlazingProcessAdd();
     }
 
-    function drawRecipeAdd() {
-      $('#recipeAddBox').replaceChildren(el('button', {
+    function drawGlazingProcessAdd() {
+      $('#glazingProcessAddBox').replaceChildren(el('button', {
         type: 'button', class: 'btn btn-secondary btn-small',
-        onclick: () => { recipeAdding = true; openRecipeAdd(); },
+        onclick: () => { glazingProcessAdding = true; openGlazingProcessAdd(); },
       }, 'New glazing process'));
     }
-    function openRecipeAdd() {
+    function openGlazingProcessAdd() {
       const glazes = [];
       const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku, dipped' });
       const notes = el('textarea', { rows: '4', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
@@ -1873,38 +1873,38 @@
         el('p', { class: 'muted small' }, 'Its thumbnail can be picked later from photos of the pieces that use it.'),
         el('div', { class: 'cf-edit-actions' },
           el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save glazing process'),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => { recipeAdding = false; drawRecipeAdd(); } }, 'Cancel')));
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => { glazingProcessAdding = false; drawGlazingProcessAdd(); } }, 'Cancel')));
       const pick = tagPicker(pickBox, glazes, 'glaze');
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         pick.flush();
         try {
-          const r = Settings.addRecipe({ name: name.value, glazes, notes: notes.value.trim() });
-          recipeAdding = false;
-          drawRecipes(); drawLists(); markChanged();
+          const r = Settings.addGlazingProcess({ name: name.value, glazes, notes: notes.value.trim() });
+          glazingProcessAdding = false;
+          drawGlazingProcesses(); drawLists(); markChanged();
           toast('Saved “' + r.name + '”');
         } catch (err) { toast(err.message); }
       });
-      $('#recipeAddBox').replaceChildren(form);
+      $('#glazingProcessAddBox').replaceChildren(form);
       name.focus();
     }
 
-    function editRecipe(li, r) {
+    function editGlazingProcess(li, r) {
       let thumb; // undefined: unchanged, null: back to the default, or { pieceId, photoId, fileId }
       const name = el('input', { maxlength: '80', value: r.name, autocomplete: 'off' });
       const notes = el('textarea', { rows: '5', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
       notes.value = r.notes || '';
-      const preview = el('div', { class: 'recipe-thumb-row' });
+      const preview = el('div', { class: 'process-thumb-row' });
       const drawPreview = () => {
         const shown = thumb === undefined ? r : { ...r, thumb: thumb || undefined };
-        preview.replaceChildren(recipeThumb(shown, { big: true }),
+        preview.replaceChildren(glazingProcessThumb(shown, { big: true }),
           el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: async () => {
-            const got = await pickRecipePhoto(r, thumb === undefined ? r.thumb || null : thumb);
+            const got = await pickGlazingProcessPhoto(r, thumb === undefined ? r.thumb || null : thumb);
             if (got !== undefined) { thumb = got; drawPreview(); }
           } }, 'Choose thumbnail'));
       };
       drawPreview();
-      // Glazes: editable straight away while no piece uses the recipe. Otherwise "Change glazes"
+      // Glazes: editable straight away while no piece uses the glazing process. Otherwise "Change glazes"
       // first says how many pieces will change, and saving updates them all.
       const glazes = [...r.glazes];
       let glazesOpen = false;
@@ -1912,11 +1912,11 @@
       const glazeNote = el('p', { class: 'muted small' });
       let glazePick = { flush: () => {} };
       const openGlazes = () => { glazesOpen = true; glazePick = tagPicker(glazeBox, glazes, 'glaze'); glazeNote.hidden = true; };
-      const usedBy = async () => (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === r.id);
+      const usedBy = async () => (await DB.allPieces()).filter((p) => !p.deleted && p.glazingProcessId === r.id);
       usedBy().then((using) => {
         if (!using.length) { openGlazes(); return; }
         glazeBox.replaceChildren(el('div', { class: 'tags' }, r.glazes.map((g) => el('span', { class: 'tag locked' }, g))),
-          el('div', { class: 'recipe-actions' }, el('button', {
+          el('div', { class: 'process-actions' }, el('button', {
             type: 'button', class: 'btn btn-ghost btn-small',
             onclick: async () => {
               const n = (await usedBy()).length;
@@ -1937,7 +1937,7 @@
         el('div', { class: 'field' }, el('span', null, 'Thumbnail'), preview),
         el('div', { class: 'cf-edit-actions' },
           el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawRecipes }, 'Cancel')));
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawGlazingProcesses }, 'Cancel')));
       let saving = false;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1951,26 +1951,26 @@
         saving = true;
         try {
           if (changes.glazes && !glazes.length) throw new Error('Add at least one glaze');
-          if (changes.name) Settings.checkRecipeName(changes.name, r.id);
-          const changed = changes.glazes ? await setRecipeGlazes(r.id, glazes) : 0;
+          if (changes.name) Settings.checkGlazingProcessName(changes.name, r.id);
+          const changed = changes.glazes ? await setGlazingProcessGlazes(r.id, glazes) : 0;
           if (Object.keys(changes).length) {
-            Settings.editRecipe(r.id, changes); markChanged();
+            Settings.editGlazingProcess(r.id, changes); markChanged();
             toast('Saved “' + name.value.trim() + '”' + (changed ? ' and updated ' + changed + (changed === 1 ? ' piece' : ' pieces') : ''));
           }
-          drawRecipes(); drawLists();
+          drawGlazingProcesses(); drawLists();
         } catch (err) { toast(err.message, 4000); } finally { saving = false; }
       });
       li.classList.add('editing');
       li.replaceChildren(form);
       name.focus();
     }
-    drawRecipes();
+    drawGlazingProcesses();
 
     onBackupStateChange = () => {
       draw(); drawSquareSettings(drawCustomFields);
       if (!$('#cfList .editing')) drawCustomFields(); // keep an open field editor
       if (!$('#listsEdit .editing')) drawLists();
-      if (!$('#recipeList .editing')) drawRecipes();
+      if (!$('#glazingProcessList .editing')) drawGlazingProcesses();
     };
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
