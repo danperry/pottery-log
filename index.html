@@ -162,6 +162,10 @@
           <span id="glazeLabel">Glazes</span>
           <div class="tag-picker" id="glazePicker" aria-labelledby="glazeLabel"></div>
         </div>
+        <div class="field">
+          <span id="recipeLabel">Recipe <i class="optional">optional</i></span>
+          <div class="recipe-box" id="recipeBox" aria-labelledby="recipeLabel"></div>
+        </div>
         <div class="field-row">
           <label class="field">
             <span>Firing type</span>
@@ -264,6 +268,14 @@
         <h2>Glazes and clays</h2>
         <p class="muted">These fill the drop-downs when you edit a piece. New ones you type on a piece are remembered here automatically. Tap the pencil to add, rename, reorder or remove them, one per line. The lists sync with your other devices.</p>
         <ul class="cf-list" id="listsEdit"></ul>
+      </div>
+
+      <div class="panel" id="recipesPanel">
+        <h2>Glaze recipes</h2>
+        <p class="muted">A recipe is a set of glazes with notes on how you apply them. Save one from a piece with two or more glazes, or add one here. Tap the pencil to change a recipe's name, notes or thumbnail. Its glazes stay as they were saved, because they record what was done to the pieces that use it. Recipes sync with your other devices.</p>
+        <ul class="cf-list recipe-list" id="recipeList"></ul>
+        <p class="muted small" id="recipeEmpty" hidden>No recipes yet.</p>
+        <div id="recipeAddBox"></div>
       </div>
 
       <div class="panel" id="customFieldsPanel">
