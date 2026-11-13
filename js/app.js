@@ -21,6 +21,7 @@
   const FILTER_KEY = 'potteryLog.filter';
   const CONNECT_TIP_KEY = 'potteryLog.connectTipDismissed';
   const FIELD_FILTER_KEY = 'potteryLog.fieldFilters'; // chosen values, per device
+  const NONE = '\u2205'; // field filter value for "no value set" (can't clash with a real value, which is trimmed text)
   const INSTALL_TIP_KEY = 'potteryLog.installTipDismissed';
   const LOCAL_ONLY_KEY = 'potteryLog.localOnlySnoozed'; // "Remind me later" on the only-in-this-browser warning
   const LOCAL_ONLY_SNOOZE = 7 * 24 * 3600 * 1000;
@@ -575,7 +576,9 @@
       if (filter !== 'all' && p.stage !== filter) return false;
       for (const id of Settings.filters()) {
         const want = fieldFilter[id];
-        if (want && !fieldValues(p, id).includes(want)) return false;
+        if (!want) continue;
+        const have = fieldValues(p, id);
+        if (want === NONE ? have.length : !have.includes(want)) return false;
       }
       if (!query) return true;
       const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '),
@@ -621,9 +624,13 @@
       box.replaceChildren(...chosen.map((d) => {
         const values = sortValues(d, [...new Set(pieces.flatMap((p) => fieldValues(p, d.id)))]);
         const cur = fieldFilter[d.id] || '';
-        if (cur && !values.includes(cur)) values.unshift(cur);
+        if (cur && cur !== NONE && !values.includes(cur)) values.unshift(cur);
+        // "none" finds pieces where the field is still empty (yes/no fields always read Yes or No).
+        const canBeEmpty = d.builtin || d.type !== 'yesno';
+        const empty = canBeEmpty ? pieces.filter((p) => !fieldValues(p, d.id).length).length : 0;
         const sel = el('select', { 'aria-label': 'Filter by ' + d.name, class: cur ? 'active' : '' },
           el('option', { value: '' }, d.name + ': any'),
+          canBeEmpty ? el('option', { value: NONE }, d.name + ': none (' + empty + ')') : null,
           values.map((v) => el('option', { value: v }, d.name + ': ' + v)));
         sel.value = cur;
         sel.addEventListener('change', () => {
@@ -1523,45 +1530,43 @@
     drawCustomFields();
     drawSquareSettings(drawCustomFields);
 
-    // Glaze and clay lists.
+    // Glaze and clay lists: one row each, edited in place as one-per-line text like a field's list.
+    const LISTS = [
+      { id: 'clays', name: 'Clay bodies', get: () => Settings.clays().map((c) => c.name), set: (names) => Settings.setClays(names.map((name) => ({ name }))) },
+      { id: 'glazes', name: 'Glazes', get: () => Settings.glazes(), set: (names) => Settings.setGlazes(names) },
+    ];
     function drawLists() {
-      const clays = Settings.clays();
-      $('#clayListEdit').replaceChildren(...clays.map((c, i) => {
-        return el('li', null, el('span', { class: 'cf-name' }, c.name), el('span', { class: 'cf-meta' }),
-          el('button', {
-            class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + c.name, html: ICON_X,
-            onclick: () => { Settings.setClays(clays.filter((_, j) => j !== i)); drawLists(); markChanged(); },
-          }));
+      $('#listsEdit').replaceChildren(...LISTS.map((l) => {
+        const items = l.get();
+        const li = el('li', { 'data-id': l.id },
+          el('span', { class: 'cf-name' }, l.name),
+          el('span', { class: 'cf-meta' }, items.length ? items.length + ': ' + items.join(', ') : 'none yet'),
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + l.name, html: ICON_EDIT, onclick: () => editList(li, l) }));
+        return li;
       }));
-      const glazes = Settings.glazes();
-      $('#glazeListEdit').replaceChildren(...glazes.map((g, i) => el('li', null,
-        el('span', { class: 'cf-name' }, g), el('span', { class: 'cf-meta' }),
-        el('button', {
-          class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + g, html: ICON_X,
-          onclick: () => { Settings.setGlazes(glazes.filter((_, j) => j !== i)); drawLists(); markChanged(); },
-        }))));
-      $('#clayListEdit').hidden = !clays.length;
-      $('#glazeListEdit').hidden = !glazes.length;
     }
-    $('#clayAddForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = $('#clayAddName').value.trim();
-      if (!name) return;
-      if (Settings.clay(name)) { toast('“' + name + '” is already in the list'); return; }
-      Settings.setClays([...Settings.clays(), { name }]);
-      $('#clayAddName').value = '';
-      drawLists(); markChanged();
-    });
-    $('#glazeAddForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = $('#glazeAddName').value.trim();
-      if (!name) return;
-      if (!Settings.learn({ glazes: [name] })) { toast('“' + name + '” is already in the list'); return; }
-      $('#glazeAddName').value = '';
-      drawLists(); markChanged();
-    });
+    function editList(li, l) {
+      const list = el('textarea', { rows: '6', 'aria-label': l.name + ', one per line' });
+      list.value = l.get().join('\n');
+      const form = el('form', { class: 'cf-edit' },
+        el('label', { class: 'field' }, el('span', null, l.name + ', one per line'), list),
+        el('div', { class: 'cf-edit-actions' },
+          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawLists }, 'Cancel')));
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const seen = new Set();
+        const names = list.value.split('\n').map((x) => x.trim().slice(0, 120))
+          .filter((x) => { const k = x.toLowerCase(); if (!x || seen.has(k)) return false; seen.add(k); return true; });
+        if (names.join('\n') !== l.get().join('\n')) { l.set(names); markChanged(); toast('Saved ' + l.name.toLowerCase()); }
+        drawLists();
+      });
+      li.classList.add('editing');
+      li.replaceChildren(form);
+      list.focus();
+    }
     drawLists();
-    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); drawLists(); drawSquareSettings(drawCustomFields); }; // keep an open field editor
+    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); if (!$('#listsEdit .editing')) drawLists(); drawSquareSettings(drawCustomFields); }; // keep an open field editor
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
