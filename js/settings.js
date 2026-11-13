@@ -11,6 +11,13 @@
  *     filters: ['clayBody', 'cf-…', …],          fields shown as filters on the home screen
  *     glazes: ['Celadon', …],                     remembered glazes, offered in a drop-down
  *     clays: [{ name: 'B-Mix' }, …],              remembered clay bodies (cones are on the bisque and glaze firing)
+ *     recipes: [{ id, name, glazes: [..],         glaze recipes: a set of glazes and how they were applied.
+ *                 notes, pieceId?, thumb?,         pieceId: the piece it was saved from (its last photo is the default
+ *                 createdAt, updatedAt }],           thumbnail); thumb: { pieceId, photoId, fileId? } picked in Settings.
+ *                                                  The glazes never change once saved. A removed recipe stays as
+ *                                                  { id, deleted: true, updatedAt } so other devices remove it too.
+ *                                                  Recipes are merged one by one when syncing, so one made on
+ *                                                  another device is never lost to a newer settings save.
  *     square: { enabled: true, appId: '' },      "Integrate with Square" (on unless turned off)
  *     defaultsAdded: true, defaultsVersion: 3,    which starter fields were offered (each set once)
  *     updatedAt: ms,
@@ -114,6 +121,7 @@
     { id: 'clayBody', name: 'Clay body' },
     { id: 'method', name: 'Forming method' },
     { id: 'glazes', name: 'Glaze' },
+    { id: 'recipe', name: 'Recipe' },
     { id: 'bisqueFiringType', name: 'Bisque firing type' },
     { id: 'bisqueCone', name: 'Bisque cone' },
     { id: 'glazeFiringType', name: 'Glaze firing type' },
@@ -131,6 +139,44 @@
   // Version 3 made Price a currency field, renamed Line to Type (with Bowl, Vase and Mug), and
   // added the Square fields (when Square is on).
   const DEFAULTS_VERSION = 3;
+
+  /* ---------- glaze recipes ---------- */
+
+  const sameGlazes = (a, b) => {
+    const k = (l) => (l || []).map((x) => String(x).toLowerCase()).sort().join('\n');
+    return k(a) === k(b);
+  };
+
+  function normalizeRecipe(r) {
+    if (!r || !r.id) return null;
+    const id = String(r.id).slice(0, 80);
+    const updatedAt = Number(r.updatedAt) || 0;
+    if (r.deleted) return { id, deleted: true, updatedAt };
+    const name = String(r.name || '').trim().slice(0, 80);
+    if (!name) return null;
+    const out = { id, name, glazes: cleanList(r.glazes), notes: String(r.notes || '').slice(0, 4000) };
+    if (r.pieceId) out.pieceId = String(r.pieceId);
+    const t = r.thumb;
+    if (t && t.pieceId && t.photoId) {
+      out.thumb = { pieceId: String(t.pieceId), photoId: String(t.photoId) };
+      if (t.fileId) out.thumb.fileId = String(t.fileId);
+    }
+    out.createdAt = Number(r.createdAt) || updatedAt;
+    out.updatedAt = updatedAt;
+    return out;
+  }
+
+  /** Combine two recipe lists by id: the newer save of each recipe wins. Oldest first. */
+  function mergeRecipes(a, b) {
+    const byId = new Map();
+    for (const r of [...(a || []), ...(b || [])]) {
+      const n = normalizeRecipe(r);
+      if (!n) continue;
+      const cur = byId.get(n.id);
+      if (!cur || n.updatedAt > cur.updatedAt) byId.set(n.id, n);
+    }
+    return [...byId.values()].sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0) || x.id.localeCompare(y.id));
+  }
 
   const cleanList = (list, max = 120) => {
     const seen = new Set();
@@ -181,7 +227,8 @@
       .filter((c) => uniqueBy(c.name));
     const sq = s.square && typeof s.square === 'object' ? s.square : {};
     const square = { enabled: sq.enabled !== false, appId: String(sq.appId || '').trim().slice(0, 100) };
-    return { fields, filters: [...new Set(filters)], glazes, clays, square, defaultsAdded: !!s.defaultsAdded,
+    const recipes = mergeRecipes(s.recipes, []);
+    return { fields, filters: [...new Set(filters)], glazes, clays, recipes, square, defaultsAdded: !!s.defaultsAdded,
       defaultsVersion: Number(s.defaultsVersion) || (s.defaultsAdded ? 1 : 0), updatedAt: Number(s.updatedAt) || 0, sync: s.sync || null };
   }
 
@@ -301,7 +348,7 @@
     return new Set(SQUARE_FIELDS.map((d) => squareField(d.role, s.fields)).filter(Boolean).map((f) => f.id));
   }
 
-  const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'cone', 'firing type', 'forming method'];
+  const RESERVED = ['title', 'stage', 'notes', 'clay body', 'clay bodies', 'glaze', 'glazes', 'recipe', 'cone', 'firing type', 'forming method'];
   function checkName(name, exceptId) {
     name = String(name || '').trim().slice(0, 60);
     if (!name) throw new Error('Give the field a name');
@@ -522,20 +569,73 @@
       return true;
     },
     setGlazes(list) { this.update({ glazes: list }); },
+
+    // ----- glaze recipes -----
+    sameGlazes,
+    /** Recipes that haven't been removed, oldest first. */
+    recipes: () => load().recipes.filter((r) => !r.deleted),
+    recipe: (id) => (id ? load().recipes.find((r) => r.id === id && !r.deleted) || null : null),
+    checkRecipeName(name, exceptId) {
+      name = String(name || '').trim().slice(0, 80);
+      if (!name) throw new Error('Give the recipe a name');
+      if (this.recipes().some((r) => r.id !== exceptId && r.name.toLowerCase() === name.toLowerCase())) {
+        throw new Error('There is already a recipe called “' + name + '”');
+      }
+      return name;
+    },
+    /** Save a new recipe: { name, glazes, notes, pieceId?, id? }. Its glazes are fixed from now on. */
+    addRecipe({ id, name, glazes, notes, pieceId }) {
+      name = this.checkRecipeName(name);
+      const list = cleanList(glazes);
+      if (!list.length) throw new Error('Add at least one glaze');
+      const now = Date.now();
+      const r = normalizeRecipe({ id: id || 'r-' + Math.random().toString(36).slice(2, 10) + now.toString(36), name, glazes: list, notes, pieceId, createdAt: now, updatedAt: now });
+      this.update({ recipes: [...load().recipes.filter((x) => x.id !== r.id), r] });
+      this.learn({ glazes: list });
+      return r;
+    },
+    /** Change a recipe's name, notes or thumbnail (thumb null: back to the default). Never its glazes. */
+    editRecipe(id, changes) {
+      const old = this.recipe(id);
+      if (!old) throw new Error('That recipe no longer exists');
+      const next = { ...old, updatedAt: Date.now() };
+      if ('name' in changes) next.name = this.checkRecipeName(changes.name, id);
+      if ('notes' in changes) next.notes = changes.notes;
+      if ('thumb' in changes) { if (changes.thumb) next.thumb = changes.thumb; else delete next.thumb; }
+      const r = normalizeRecipe(next);
+      this.update({ recipes: load().recipes.map((x) => (x.id === id ? r : x)) });
+      return r;
+    },
+    removeRecipe(id) {
+      this.update({ recipes: load().recipes.map((x) => (x.id === id ? { id, deleted: true, updatedAt: Date.now() } : x)) });
+    },
     setClays(list) { this.update({ clays: list }); },
 
     // ----- sync bookkeeping -----
     /** What goes into the index (no local bookkeeping). */
     forDrive() {
       const s = load();
-      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, square: s.square, defaultsAdded: s.defaultsAdded, defaultsVersion: s.defaultsVersion, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
+      return { fields: s.fields, filters: s.filters, glazes: s.glazes, clays: s.clays, recipes: s.recipes, square: s.square, defaultsAdded: s.defaultsAdded, defaultsVersion: s.defaultsVersion, savedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null };
     },
     isDirty(rootId) { const s = load(); return !!s.updatedAt && (!s.sync || s.sync.root !== rootId || s.sync.syncedAt !== s.updatedAt); },
     markSynced(rootId, at) { const s = load(); write({ ...s, sync: { root: rootId, syncedAt: at } }); },
-    /** Replace with a newer copy from Drive. */
+    /** Replace with a newer copy from Drive. Recipes are combined with this device's, and when
+     * this device had some that Drive lacked, the result is saved again so it goes up too. */
     applyRemote(remote, rootId) {
       const at = Date.parse(remote.savedAt) || 0;
-      write({ ...normalize({ ...remote, updatedAt: at }), sync: { root: rootId, syncedAt: at } });
+      const local = load().recipes;
+      const theirs = normalize({ ...remote, updatedAt: at });
+      const recipes = mergeRecipes(theirs.recipes, local);
+      write({ ...theirs, recipes, sync: { root: rootId, syncedAt: at } });
+      if (JSON.stringify(recipes) !== JSON.stringify(theirs.recipes)) this.update({});
+    },
+    /** Take in recipes from an older copy in Drive (this device's settings are newer). */
+    absorbRecipes(list) {
+      const s = load();
+      const recipes = mergeRecipes(s.recipes, list);
+      if (JSON.stringify(recipes) === JSON.stringify(s.recipes)) return false;
+      this.update({ recipes });
+      return true;
     },
     onChange(fn) { listeners.add(fn); },
   };

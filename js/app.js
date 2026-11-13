@@ -470,9 +470,13 @@
   /**
    * Chosen values as tags, plus a drop-down of remembered ones and a "New…" option to type
    * one. kind is 'glaze' or 'clay'.
-   * Returns { flush() } to add anything typed but not yet added.
+   * opts.locked(): true while the values can't be changed (glazes set by a recipe).
+   * opts.onChange(): after a value is added or removed.
+   * Returns { flush() } to add anything typed but not yet added, and redraw().
    */
-  function tagPicker(box, values, kind) {
+  function tagPicker(box, values, kind, opts = {}) {
+    const locked = opts.locked || (() => false);
+    let ready = false;
     const noun = kind === 'clay' ? 'clay body' : 'glaze';
     const known = () => (kind === 'clay' ? Settings.clays().map((c) => c.name) : Settings.glazes());
     const tags = el('div', { class: 'tags' });
@@ -485,10 +489,17 @@
       values.push(v);
     }
     function drawTags() {
+      if (locked()) { tags.replaceChildren(...values.map((v) => el('span', { class: 'tag locked' }, v))); return; }
       tags.replaceChildren(...values.map((v, i) => el('span', { class: 'tag' }, v,
         el('button', { type: 'button', 'aria-label': 'Remove ' + v, html: ICON_X, onclick: () => { values.splice(i, 1); draw(); } }))));
     }
     function drawRow() {
+      if (locked()) {
+        typing = false;
+        row.flush = () => {};
+        row.replaceChildren(el('p', { class: 'muted small' }, 'Set by the recipe below. Remove the recipe to change them.'));
+        return;
+      }
       if (typing) {
         const input = el('input', { maxlength: '120', autocomplete: 'off', placeholder: 'New ' + noun + ' name', 'aria-label': 'New ' + noun + ' name' });
         const commit = () => { add(input.value); typing = false; draw(); };
@@ -510,10 +521,111 @@
       });
       row.replaceChildren(sel);
     }
-    function draw() { drawTags(); drawRow(); }
+    function draw() { drawTags(); drawRow(); if (ready && opts.onChange) opts.onChange(); }
     box.replaceChildren(tags, row);
     draw();
-    return { flush: () => row.flush() };
+    ready = true;
+    return { flush: () => row.flush(), redraw: draw };
+  }
+
+  /* ---------- glaze recipes ---------- */
+
+  const recipeName = (p) => { const r = p && Settings.recipe(p.recipeId); return r ? r.name : ''; };
+
+  /** A photo by its piece and id, downloaded from Drive if needed (fileId saves looking it up). */
+  async function refPhotoUrl(ref, live) {
+    const here = await photoUrl(ref.photoId);
+    if (here) return here;
+    let p = live && live.id === ref.pieceId ? live : await DB.getPiece(ref.pieceId);
+    const fileOf = (x) => x && x.sync && x.sync.photoFiles && x.sync.photoFiles[ref.photoId];
+    const tryFile = async (fileId) => {
+      if (fileId) await fetchPhotoOnce({ sync: { photoFiles: { [ref.photoId]: fileId } } }, ref.photoId);
+      return fileId ? photoUrl(ref.photoId) : null;
+    };
+    let u = await tryFile(ref.fileId);
+    if (!u && fileOf(p) !== ref.fileId) u = await tryFile(fileOf(p)); // the piece moved to another folder
+    if (!u && p && p.stub && !fileOf(p) && connected() && navigator.onLine) { // not opened on this device yet
+      p = await loadDetails(p.id).catch(() => null);
+      u = await tryFile(fileOf(p));
+    }
+    return u;
+  }
+
+  /** The default thumbnail: the last photo of the piece the recipe was saved from. */
+  async function recipeDefaultRef(r, live) {
+    if (!r.pieceId) return null;
+    const p = live && live.id === r.pieceId ? live : await DB.getPiece(r.pieceId);
+    if (!p || p.deleted) return null;
+    const ids = p.photoIds || [];
+    const pid = p.stub ? PhotoCache.coverOf(p) : ids[ids.length - 1];
+    return pid ? { pieceId: p.id, photoId: pid } : null;
+  }
+
+  /** The recipe's thumbnail: the one picked in Settings, or else the default. live: a piece being edited. */
+  async function recipeThumbUrl(r, live) {
+    if (r.thumb) { const u = await refPhotoUrl(r.thumb, live).catch(() => null); if (u) return u; }
+    const ref = await recipeDefaultRef(r, live);
+    return ref ? refPhotoUrl(ref, live).catch(() => null) : null;
+  }
+
+  function recipeThumb(r, { live, big } = {}) {
+    const box = el('div', { class: 'recipe-thumb' + (big ? ' big' : ''), html: ICON_POT });
+    recipeThumbUrl(r, live).then((u) => { if (u) box.replaceChildren(el('img', { src: u, alt: '' })); });
+    return box;
+  }
+
+  function recipeCard(r, opts = {}) {
+    return el(opts.onclick ? 'button' : 'div', { class: 'recipe-card' + (opts.match ? ' match' : ''), type: opts.onclick ? 'button' : null, onclick: opts.onclick || null },
+      recipeThumb(r, opts),
+      el('div', { class: 'recipe-meta' },
+        el('strong', null, r.name),
+        el('span', { class: 'sub' }, r.glazes.join(', ') + (opts.match ? ' · same glazes as this piece' : '')),
+        opts.notes !== false && r.notes ? el('p', { class: 'recipe-notes' }, r.notes) : null));
+  }
+
+  /** A pop-up sheet with a form. build(form, close) fills it; resolves with what close() was given. */
+  function sheet(title, build) {
+    return new Promise((resolve) => {
+      const titleId = 'sheet-' + Date.now();
+      const form = el('form', { method: 'dialog' }, el('h2', { id: titleId }, title));
+      const dlg = el('dialog', { class: 'sheet recipe-sheet', 'aria-labelledby': titleId }, form);
+      let result;
+      const close = (v) => { result = v; dlg.close(); };
+      dlg.addEventListener('close', () => { resolve(result); dlg.remove(); });
+      build(form, close);
+      document.body.append(dlg);
+      dlg.showModal();
+    });
+  }
+
+  /** Choose one of the saved recipes. Resolves with the recipe, or undefined. */
+  function chooseRecipe(glazes, live) {
+    return sheet('Choose a recipe', (form, close) => {
+      form.append(
+        el('div', { class: 'recipe-choices' }, Settings.recipes().map((r) =>
+          recipeCard(r, { live, notes: false, match: glazes.length && Settings.sameGlazes(glazes, r.glazes), onclick: () => close(r) }))),
+        el('div', { class: 'form-actions ask-actions' }, el('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, 'Cancel')));
+    });
+  }
+
+  /** Ask for a new recipe's name and notes. Resolves with { name, notes }, or undefined. */
+  function askRecipeDetails(glazes) {
+    return sheet('Save as a recipe', (form, close) => {
+      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku', required: true });
+      const notes = el('textarea', { rows: '5', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
+      form.append(
+        el('p', { class: 'muted small' }, 'Glazes: ' + glazes.join(', ')),
+        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
+        el('div', { class: 'form-actions ask-actions' },
+          el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
+          el('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Save recipe')));
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        try { close({ name: Settings.checkRecipeName(name.value), notes: notes.value.trim() }); } catch (err) { toast(err.message); name.focus(); }
+      });
+      setTimeout(() => name.focus(), 0);
+    });
   }
 
   /* ---------- field values (built-in and custom), for filters and display ---------- */
@@ -525,6 +637,7 @@
   /** The value(s) of a field on a piece, as display strings. */
   function fieldValues(p, id) {
     if (id === 'glazes') return p.glazes || [];
+    if (id === 'recipe') { const n = recipeName(p); return n ? [n] : []; }
     if (id === 'method') return p.method ? [METHOD_LABEL[p.method] || p.method] : [];
     if (id === 'clayBody') return claysOf(p);
     if (id === 'bisqueCone' || id === 'glazeCone') { const c = firingsOf(p)[id]; return c ? [coneLabel(c)] : []; }
@@ -581,7 +694,7 @@
         if (want === NONE ? have.length : !have.includes(want)) return false;
       }
       if (!query) return true;
-      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '),
+      const hay = [p.title, claysOf(p).join(' '), METHOD_LABEL[p.method], (p.glazes || []).join(' '), recipeName(p),
         ...['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone'].flatMap((id) => fieldValues(p, id)), p.notes, ...Settings.fields().flatMap((f) => fieldValues(p, f.id))].join(' ').toLowerCase();
       return query.split(/\s+/).every((w) => hay.includes(w));
     }
@@ -810,6 +923,11 @@
     if (clays.length) add(clays.length > 1 ? 'Clay bodies' : 'Clay body', clays.join(', '));
     add('Forming', METHOD_LABEL[p.method]);
     if (p.glazes && p.glazes.length) add('Glazes', el('div', { class: 'glaze-list' }, p.glazes.map((g) => el('span', null, g))));
+    const recipe = Settings.recipe(p.recipeId);
+    if (recipe) {
+      add('Recipe', el('div', { class: 'recipe-fact' }, recipeThumb(recipe),
+        el('div', { class: 'recipe-meta' }, el('strong', null, recipe.name), recipe.notes ? el('p', { class: 'recipe-notes' }, recipe.notes) : null)));
+    }
     const fire = firingsOf(p);
     add('Bisque firing', [fire.bisqueFiringType, coneLabel(fire.bisqueCone)].filter(Boolean).join(', '));
     add('Glaze firing', [fire.glazeFiringType, coneLabel(fire.glazeCone)].filter(Boolean).join(', '));
@@ -906,7 +1024,57 @@
     piece.glazes = [...(piece.glazes || [])];
     const hadNames = new Set([...piece.clays, ...piece.glazes].map((v) => v.toLowerCase())); // removed from a list stays removed
     const clayPick = tagPicker($('#clayPicker'), piece.clays, 'clay');
-    const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze');
+
+    // Recipe: a saved set of glazes. While one is applied, the glazes are the recipe's and can't
+    // be changed. One saved here ("Save as a recipe") is created when the piece is saved.
+    let pendingRecipe = null;
+    const recipeOf = (rid) => (rid && pendingRecipe && pendingRecipe.id === rid ? pendingRecipe : Settings.recipe(rid));
+    if (piece.recipeId && !recipeOf(piece.recipeId)) delete piece.recipeId; // removed on another device
+    const glazePick = tagPicker($('#glazePicker'), piece.glazes, 'glaze', { locked: () => !!recipeOf(piece.recipeId), onChange: drawRecipe });
+    function drawRecipe() {
+      const box = $('#recipeBox');
+      if (!box) return;
+      const r = recipeOf(piece.recipeId);
+      if (r) {
+        box.replaceChildren(recipeCard(r, { live: piece }),
+          el('div', { class: 'recipe-actions' }, el('button', {
+            type: 'button', class: 'btn btn-ghost btn-small',
+            onclick: () => { delete piece.recipeId; glazePick.redraw(); drawRecipe(); },
+          }, 'Remove recipe'),
+          r === pendingRecipe ? el('p', { class: 'muted small' }, 'The recipe is saved when you save the piece.') : null));
+        return;
+      }
+      const parts = [];
+      if (Settings.recipes().length) parts.push(el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: pickRecipe }, 'Choose a recipe…'));
+      if (piece.glazes.length >= 2) parts.push(el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: saveAsRecipe }, 'Save glazes as a recipe'));
+      if (!parts.length) parts.push(el('p', { class: 'muted small' }, 'Add two or more glazes to save them as a recipe.'));
+      box.replaceChildren(el('div', { class: 'recipe-actions' }, ...parts));
+    }
+    async function pickRecipe() {
+      glazePick.flush();
+      const r = await chooseRecipe(piece.glazes, piece);
+      if (!r) return;
+      if (piece.glazes.length && !Settings.sameGlazes(piece.glazes, r.glazes) && !(await ask({
+        title: 'Change the glazes to “' + r.name + '”?',
+        message: ['This piece has ' + piece.glazes.join(', ') + '.', 'Applying the recipe changes its glazes to ' + r.glazes.join(', ') + '.'],
+        confirm: 'Apply recipe',
+      }))) return;
+      piece.glazes.splice(0, piece.glazes.length, ...r.glazes);
+      piece.recipeId = r.id;
+      glazePick.redraw();
+      drawRecipe();
+    }
+    async function saveAsRecipe() {
+      glazePick.flush();
+      if (piece.glazes.length < 2) { drawRecipe(); return; }
+      const d = await askRecipeDetails(piece.glazes);
+      if (!d) return;
+      pendingRecipe = { id: 'r-' + DB.uid(), name: d.name, notes: d.notes, glazes: [...piece.glazes], pieceId: piece.id };
+      piece.recipeId = pendingRecipe.id;
+      glazePick.redraw();
+      drawRecipe();
+    }
+    drawRecipe();
 
     // Bisque and glaze firing: the same two drop-downs in each section.
     Object.assign(piece, firingsOf(piece));
@@ -1042,6 +1210,10 @@
       clayPick.flush(); glazePick.flush();
       const title = f.title.value.trim();
       if (!title) { toast('Give the piece a title'); f.title.focus(); return; }
+      if (pendingRecipe && piece.recipeId === pendingRecipe.id) {
+        try { Settings.addRecipe(pendingRecipe); pendingRecipe = null; } catch (err) { toast(err.message, 4000); return; }
+      }
+      if (!piece.recipeId || !Settings.recipe(piece.recipeId)) delete piece.recipeId;
       piece.title = title;
       piece.method = (form.querySelector('input[name=method]:checked') || {}).value || '';
       for (const k of ['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone']) piece[k] = f[k].value;
@@ -1308,6 +1480,71 @@
     usageEl.textContent = text;
   }
 
+  /** Notes and photo list of a synced piece, without downloading its photos. */
+  const detailLoads = new Map();
+  function loadDetails(id) {
+    if (!detailLoads.has(id)) detailLoads.set(id, Sync.loadPiece(id, { photos: false }).finally(() => detailLoads.delete(id)));
+    return detailLoads.get(id);
+  }
+
+  /**
+   * Pick a recipe's thumbnail from the photos of every piece that uses it (and the piece it was
+   * saved from). Photos load only as they scroll into view, a few at a time, so a big log stays
+   * quick. Resolves with { pieceId, photoId, fileId }, null for the default, or undefined.
+   */
+  function pickRecipePhoto(r, current) {
+    return sheet('Thumbnail for “' + r.name + '”', async (form, close) => {
+      const box = el('div', { class: 'photo-pick' });
+      form.append(
+        el('p', { class: 'muted small' }, 'Photos of the pieces that use this recipe.'),
+        box,
+        el('div', { class: 'form-actions ask-actions' }, el('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, 'Cancel')));
+      const origin = r.pieceId ? await DB.getPiece(r.pieceId) : null;
+      box.append(el('button', {
+        type: 'button', class: 'btn btn-ghost btn-small default-pick', 'aria-pressed': String(!current), onclick: () => close(null),
+      }, origin && !origin.deleted ? 'Default: last photo of “' + (origin.title || 'Untitled') + '”' : 'Default (no photo)'));
+      const pieces = (await DB.allPieces()).filter((p) => !p.deleted && (p.recipeId === r.id || p.id === r.pieceId))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const seen = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          seen.unobserve(e.target);
+          e.target.load();
+        }
+      }, { root: box, rootMargin: '200px' });
+      form.closest('dialog').addEventListener('close', () => seen.disconnect());
+      let any = false;
+      for (const p0 of pieces) {
+        const grid = el('div', { class: 'photo-grid' });
+        const note = el('p', { class: 'muted small' });
+        box.append(el('h3', null, p0.title || 'Untitled'), grid, note);
+        let p = p0;
+        if (p.stub) {
+          if (!connected() || !navigator.onLine) { note.textContent = 'Connect to Google Drive to see this piece\'s photos.'; continue; }
+          note.textContent = 'Loading from Google Drive…';
+          try { p = await loadDetails(p.id); note.textContent = ''; } catch (err) { note.textContent = 'Could not load its photos.'; continue; }
+          if (!box.isConnected) return;
+        }
+        const ids = p.photoIds || [];
+        if (!ids.length) { note.textContent = 'No photos yet.'; continue; }
+        any = true;
+        for (const pid of ids) {
+          const chosen = current && current.pieceId === p.id && current.photoId === pid;
+          const btn = el('button', { type: 'button', 'aria-label': 'Use this photo of ' + (p.title || 'Untitled'), onclick: () => {
+            close({ pieceId: p.id, photoId: pid, fileId: (p.sync && p.sync.photoFiles && p.sync.photoFiles[pid]) || undefined });
+          } });
+          const item = el('div', { class: 'photo-item' + (chosen ? ' chosen' : '') }, btn);
+          item.load = () => piecePhotoUrl(p, pid).then((u) => { if (u) btn.replaceChildren(el('img', { src: u, alt: '' })); }).catch(() => {});
+          grid.append(item);
+          seen.observe(item);
+        }
+      }
+      if (!pieces.length || (!any && !box.querySelector('.photo-grid:not(:empty)'))) {
+        box.append(el('p', { class: 'muted small' }, pieces.length ? 'None of these pieces has photos yet.' : 'No piece uses this recipe yet. Apply it to a piece, then pick one of its photos here.'));
+      }
+    });
+  }
+
   async function renderBackup() {
     setChrome({ title: 'Settings', back: true, fab: false });
     mount('tpl-backup');
@@ -1566,7 +1803,121 @@
       list.focus();
     }
     drawLists();
-    onBackupStateChange = () => { draw(); if (!$('#cfList .editing')) drawCustomFields(); if (!$('#listsEdit .editing')) drawLists(); drawSquareSettings(drawCustomFields); }; // keep an open field editor
+
+    // Glaze recipes: name, notes and thumbnail can change; the glazes never do.
+    let recipeAdding = false;
+    async function drawRecipes() {
+      const all = (await DB.allPieces()).filter((p) => !p.deleted);
+      const listEl = $('#recipeList');
+      if (!listEl) return;
+      const recipes = Settings.recipes();
+      const uses = (r) => all.filter((p) => p.recipeId === r.id).length;
+      listEl.replaceChildren(...recipes.map((r) => {
+        const n = uses(r);
+        const li = el('li', { 'data-id': r.id },
+          recipeThumb(r),
+          el('div', { class: 'cf-text' },
+            el('span', { class: 'cf-name' }, r.name),
+            el('span', { class: 'cf-meta' }, r.glazes.join(', ') + ' · ' + (n ? n + (n === 1 ? ' piece' : ' pieces') : 'not used yet'))),
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Edit ' + r.name, html: ICON_EDIT, onclick: () => editRecipe(li, r) }),
+          n ? el('span', { class: 'icon-btn-space', 'aria-hidden': 'true' }) : el('button', {
+            class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + r.name, html: ICON_X,
+            onclick: async () => {
+              if (!(await ask({ title: 'Remove “' + r.name + '”?', message: 'No piece uses it. It is removed here and on your other devices.', confirm: 'Remove', danger: true }))) return;
+              Settings.removeRecipe(r.id);
+              drawRecipes();
+              markChanged();
+            },
+          }));
+        return li;
+      }));
+      listEl.hidden = !recipes.length;
+      $('#recipeEmpty').hidden = !!recipes.length;
+      if (!recipeAdding) drawRecipeAdd();
+    }
+
+    function drawRecipeAdd() {
+      $('#recipeAddBox').replaceChildren(el('button', {
+        type: 'button', class: 'btn btn-secondary btn-small',
+        onclick: () => { recipeAdding = true; openRecipeAdd(); },
+      }, 'New recipe'));
+    }
+    function openRecipeAdd() {
+      const glazes = [];
+      const name = el('input', { maxlength: '80', autocomplete: 'off', placeholder: 'e.g. Celadon over tenmoku' });
+      const notes = el('textarea', { rows: '4', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
+      const pickBox = el('div', { class: 'tag-picker' });
+      const form = el('form', { class: 'cf-edit' },
+        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('div', { class: 'field' }, el('span', null, 'Glazes'), pickBox),
+        el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
+        el('p', { class: 'muted small' }, 'The glazes can\'t be changed once the recipe is saved. Its thumbnail can be picked from photos of the pieces that use it.'),
+        el('div', { class: 'cf-edit-actions' },
+          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save recipe'),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => { recipeAdding = false; drawRecipeAdd(); } }, 'Cancel')));
+      const pick = tagPicker(pickBox, glazes, 'glaze');
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        pick.flush();
+        try {
+          const r = Settings.addRecipe({ name: name.value, glazes, notes: notes.value.trim() });
+          recipeAdding = false;
+          drawRecipes(); drawLists(); markChanged();
+          toast('Saved “' + r.name + '”');
+        } catch (err) { toast(err.message); }
+      });
+      $('#recipeAddBox').replaceChildren(form);
+      name.focus();
+    }
+
+    function editRecipe(li, r) {
+      let thumb; // undefined: unchanged, null: back to the default, or { pieceId, photoId, fileId }
+      const name = el('input', { maxlength: '80', value: r.name, autocomplete: 'off' });
+      const notes = el('textarea', { rows: '5', maxlength: '4000', placeholder: 'How you apply the glazes: order, dips, seconds, thickness, wax…' });
+      notes.value = r.notes || '';
+      const preview = el('div', { class: 'recipe-thumb-row' });
+      const drawPreview = () => {
+        const shown = thumb === undefined ? r : { ...r, thumb: thumb || undefined };
+        preview.replaceChildren(recipeThumb(shown, { big: true }),
+          el('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: async () => {
+            const got = await pickRecipePhoto(r, thumb === undefined ? r.thumb || null : thumb);
+            if (got !== undefined) { thumb = got; drawPreview(); }
+          } }, 'Choose thumbnail'));
+      };
+      drawPreview();
+      const form = el('form', { class: 'cf-edit' },
+        el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
+        el('div', { class: 'field' }, el('span', null, 'Glazes'),
+          el('div', { class: 'tags' }, r.glazes.map((g) => el('span', { class: 'tag locked' }, g))),
+          el('p', { class: 'muted small' }, 'Glazes can\'t be changed, because that would change what was done to the pieces that use this recipe. Make a new recipe instead.')),
+        el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
+        el('div', { class: 'field' }, el('span', null, 'Thumbnail'), preview),
+        el('div', { class: 'cf-edit-actions' },
+          el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawRecipes }, 'Cancel')));
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const changes = {};
+        if (name.value.trim() !== r.name) changes.name = name.value;
+        if (notes.value.trim() !== (r.notes || '')) changes.notes = notes.value.trim();
+        if (thumb !== undefined && JSON.stringify(thumb) !== JSON.stringify(r.thumb || null)) changes.thumb = thumb;
+        try {
+          if (Object.keys(changes).length) { Settings.editRecipe(r.id, changes); markChanged(); toast('Saved “' + name.value.trim() + '”'); }
+          drawRecipes();
+        } catch (err) { toast(err.message); }
+      });
+      li.classList.add('editing');
+      li.replaceChildren(form);
+      name.focus();
+    }
+    drawRecipes();
+
+    onBackupStateChange = () => {
+      draw(); drawSquareSettings(drawCustomFields);
+      if (!$('#cfList .editing')) drawCustomFields(); // keep an open field editor
+      if (!$('#listsEdit .editing')) drawLists();
+      if (!$('#recipeList .editing')) drawRecipes();
+    };
 
     // Check the saved folder still exists, and offer Pottery Log folders already in Drive
     // (works without the picker, e.g. on a new device or in browsers that block it).
