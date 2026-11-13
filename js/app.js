@@ -1545,6 +1545,25 @@
     });
   }
 
+  /** Give every piece using a recipe its new glazes. Pieces synced from another device are
+   * loaded first, so the change isn't lost when they upload. Nothing changes unless all can be. */
+  async function setRecipeGlazes(recipeId, glazes) {
+    let using = (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === recipeId);
+    const stubs = using.filter((p) => p.stub);
+    if (stubs.length) {
+      if (!connected() || !navigator.onLine) {
+        throw new Error((stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' using this recipe ' + (stubs.length === 1 ? 'hasn\'t' : 'haven\'t') +
+          ' been opened on this device yet. Connect to Google Drive to change its glazes.');
+      }
+      toast('Loading ' + (stubs.length === 1 ? '1 piece' : stubs.length + ' pieces') + ' from Google Drive…', 2000);
+      for (const p of stubs) await loadDetails(p.id);
+      using = (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === recipeId);
+    }
+    const now = Date.now();
+    for (const p of using) await DB.putPiece({ ...p, glazes: [...glazes], updatedAt: now });
+    return using.length;
+  }
+
   async function renderBackup() {
     setChrome({ title: 'Settings', back: true, fab: false });
     mount('tpl-backup');
@@ -1885,26 +1904,61 @@
           } }, 'Choose thumbnail'));
       };
       drawPreview();
+      // Glazes: editable straight away while no piece uses the recipe. Otherwise "Change glazes"
+      // first says how many pieces will change, and saving updates them all.
+      const glazes = [...r.glazes];
+      let glazesOpen = false;
+      const glazeBox = el('div', { class: 'tag-picker' });
+      const glazeNote = el('p', { class: 'muted small' });
+      let glazePick = { flush: () => {} };
+      const openGlazes = () => { glazesOpen = true; glazePick = tagPicker(glazeBox, glazes, 'glaze'); glazeNote.hidden = true; };
+      const usedBy = async () => (await DB.allPieces()).filter((p) => !p.deleted && p.recipeId === r.id);
+      usedBy().then((using) => {
+        if (!using.length) { openGlazes(); return; }
+        glazeBox.replaceChildren(el('div', { class: 'tags' }, r.glazes.map((g) => el('span', { class: 'tag locked' }, g))),
+          el('div', { class: 'recipe-actions' }, el('button', {
+            type: 'button', class: 'btn btn-ghost btn-small',
+            onclick: async () => {
+              const n = (await usedBy()).length;
+              if (!(await ask({
+                title: 'Change the glazes on ' + n + (n === 1 ? ' piece?' : ' pieces?'),
+                message: [(n === 1 ? '1 piece uses' : n + ' pieces use') + ' “' + r.name + '”. When you save, the new glazes replace the glazes on ' + (n === 1 ? 'that piece' : 'all of them') + ', here and on your other devices.'],
+                confirm: 'Change glazes',
+              }))) return;
+              openGlazes();
+            },
+          }, 'Change glazes')));
+        glazeNote.textContent = (using.length === 1 ? '1 piece uses' : using.length + ' pieces use') + ' this recipe, so changing its glazes changes ' + (using.length === 1 ? 'that piece' : 'those pieces') + ' too.';
+      });
       const form = el('form', { class: 'cf-edit' },
         el('label', { class: 'field' }, el('span', null, 'Recipe name'), name),
-        el('div', { class: 'field' }, el('span', null, 'Glazes'),
-          el('div', { class: 'tags' }, r.glazes.map((g) => el('span', { class: 'tag locked' }, g))),
-          el('p', { class: 'muted small' }, 'Glazes can\'t be changed, because that would change what was done to the pieces that use this recipe. Make a new recipe instead.')),
+        el('div', { class: 'field' }, el('span', null, 'Glazes'), glazeBox, glazeNote),
         el('label', { class: 'field' }, el('span', null, 'Notes'), notes),
         el('div', { class: 'field' }, el('span', null, 'Thumbnail'), preview),
         el('div', { class: 'cf-edit-actions' },
           el('button', { type: 'submit', class: 'btn btn-secondary btn-small' }, 'Save'),
           el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: drawRecipes }, 'Cancel')));
-      form.addEventListener('submit', (e) => {
+      let saving = false;
+      form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (saving) return;
+        glazePick.flush();
         const changes = {};
         if (name.value.trim() !== r.name) changes.name = name.value;
         if (notes.value.trim() !== (r.notes || '')) changes.notes = notes.value.trim();
         if (thumb !== undefined && JSON.stringify(thumb) !== JSON.stringify(r.thumb || null)) changes.thumb = thumb;
+        if (glazesOpen && glazes.join('\n') !== r.glazes.join('\n')) changes.glazes = [...glazes];
+        saving = true;
         try {
-          if (Object.keys(changes).length) { Settings.editRecipe(r.id, changes); markChanged(); toast('Saved “' + name.value.trim() + '”'); }
-          drawRecipes();
-        } catch (err) { toast(err.message); }
+          if (changes.glazes && !glazes.length) throw new Error('Add at least one glaze');
+          if (changes.name) Settings.checkRecipeName(changes.name, r.id);
+          const changed = changes.glazes ? await setRecipeGlazes(r.id, glazes) : 0;
+          if (Object.keys(changes).length) {
+            Settings.editRecipe(r.id, changes); markChanged();
+            toast('Saved “' + name.value.trim() + '”' + (changed ? ' and updated ' + changed + (changed === 1 ? ' piece' : ' pieces') : ''));
+          }
+          drawRecipes(); drawLists();
+        } catch (err) { toast(err.message, 4000); } finally { saving = false; }
       });
       li.classList.add('editing');
       li.replaceChildren(form);
