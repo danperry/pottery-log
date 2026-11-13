@@ -37,6 +37,7 @@
   const ICON_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   const ICON_GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>';
   const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
+  const ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   const ICON_POT = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M22 10h20M24 10c0 6-10 10-10 24 0 12 8 20 18 20s18-8 18-20c0-14-10-18-10-24"/></svg>';
 
   /* ---------- small helpers ---------- */
@@ -268,6 +269,7 @@
     if (view === 'piece' && id) return renderDetail(decodeURIComponent(id));
     if (view === 'edit' && id) return renderEdit(decodeURIComponent(id));
     if (view === 'new') return renderEdit(null);
+    if (view === 'bulk') return renderBulkEdit();
     if (view === 'backup') return renderBackup();
     return renderList();
   }
@@ -657,6 +659,41 @@
     return values.sort((a, b) => a.localeCompare(b));
   }
 
+  /* ---------- selecting several pieces ---------- */
+
+  // The selection outlives a trip to the bulk edit screen (and a reload, for this tab).
+  const SELECTION_KEY = 'potteryLog.selection';
+  let selectMode = false;
+  const selected = new Set();
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(SELECTION_KEY) || 'null');
+    if (kept && kept.on) { selectMode = true; kept.ids.forEach((id) => selected.add(id)); }
+  } catch (e) { /* none kept */ }
+  function saveSelection() {
+    try { sessionStorage.setItem(SELECTION_KEY, JSON.stringify({ on: selectMode, ids: [...selected] })); } catch (e) { /* ignore */ }
+  }
+  function clearSelection() { selectMode = false; selected.clear(); saveSelection(); }
+
+  /** Call fire() when the element is pressed and held, without moving, for half a second. */
+  function onLongPress(elm, fire) {
+    let timer = null;
+    let start = null;
+    let kind = '';
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    elm.addEventListener('pointerdown', (e) => {
+      kind = e.pointerType;
+      if (e.button) return;
+      start = { x: e.clientX, y: e.clientY };
+      cancel();
+      timer = setTimeout(() => { timer = null; fire(); }, 500);
+    });
+    elm.addEventListener('pointermove', (e) => {
+      if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => elm.addEventListener(t, cancel));
+    elm.addEventListener('contextmenu', (e) => { if (kind && kind !== 'mouse') e.preventDefault(); }); // phones' own long-press menu
+  }
+
   /* ---------- list view ---------- */
 
   async function renderList() {
@@ -706,6 +743,8 @@
       $('#countLabel').textContent = shown.length === pieces.length
         ? pieces.length + (pieces.length === 1 ? ' piece' : ' pieces')
         : shown.length + ' of ' + pieces.length + ' pieces';
+      shownIds = shown.map((p) => p.id);
+      cardEls.clear();
       listEl.replaceChildren(...shown.map((p) => {
         const thumb = el('div', { class: 'thumb', html: ICON_POT });
         if (p.photoIds && p.photoIds.length) {
@@ -714,14 +753,88 @@
             .then((u) => { if (u) thumb.replaceChildren(el('img', { src: u, alt: '', loading: 'lazy' })); });
         }
         const sub = [claysOf(p).join(', '), (p.glazes || []).join(', ')].filter(Boolean).join(' · ') || METHOD_LABEL[p.method] || '';
-        return el('li', null, el('button', { class: 'card', onclick: () => nav('#/piece/' + encodeURIComponent(p.id)) },
-          thumb,
-          el('div', { class: 'meta' },
-            el('div', { class: 'title' }, p.title || 'Untitled'),
-            sub ? el('div', { class: 'sub' }, sub) : null,
-            stagePill(p.stage))));
+        const card = el('button', { class: 'card', type: 'button', onclick: () => {
+          if (longPressed) { longPressed = false; return; } // the press that started selecting
+          if (selectMode) toggleSelected(p.id); else nav('#/piece/' + encodeURIComponent(p.id));
+        } },
+        thumb,
+        el('span', { class: 'check', 'aria-hidden': 'true', html: ICON_CHECK }),
+        el('div', { class: 'meta' },
+          el('div', { class: 'title' }, p.title || 'Untitled'),
+          sub ? el('div', { class: 'sub' }, sub) : null,
+          stagePill(p.stage)));
+        onLongPress(card, () => {
+          longPressed = true;
+          if (navigator.vibrate) navigator.vibrate(15);
+          if (!selectMode) { selectMode = true; saveSelection(); }
+          if (!selected.has(p.id)) toggleSelected(p.id); else drawSelection();
+        });
+        cardEls.set(p.id, card);
+        return el('li', null, card);
       }));
+      drawSelection();
     }
+
+    /* Selecting several pieces: a long press, "Select" or "Select all" starts it. */
+    let shownIds = [];
+    const cardEls = new Map();
+    let longPressed = false;
+    function toggleSelected(id) {
+      if (selected.has(id)) selected.delete(id); else selected.add(id);
+      saveSelection();
+      drawSelection();
+    }
+    function startSelecting(all) {
+      selectMode = true;
+      if (all) shownIds.forEach((id) => selected.add(id));
+      saveSelection();
+      drawSelection();
+    }
+    function stopSelecting() {
+      selectMode = false;
+      selected.clear();
+      saveSelection();
+      drawSelection();
+    }
+    function drawSelection() {
+      for (const id of selected) if (!pieces.some((p) => p.id === id)) selected.delete(id); // deleted meanwhile
+      view.classList.toggle('selecting', selectMode);
+      for (const [id, card] of cardEls) {
+        const on = selectMode && selected.has(id);
+        card.classList.toggle('selected', on);
+        card.setAttribute('aria-pressed', selectMode ? String(on) : null);
+        if (!selectMode) card.removeAttribute('aria-pressed');
+      }
+      const links = $('#selectLinks');
+      const link = (label, run) => el('button', { type: 'button', class: 'link-btn', onclick: run }, label);
+      if (!pieces.length) links.replaceChildren();
+      else if (!selectMode) links.replaceChildren(link('Select', () => startSelecting(false)), link('Select all', () => startSelecting(true)));
+      else {
+        const allShown = shownIds.length && shownIds.every((id) => selected.has(id));
+        links.replaceChildren(
+          allShown ? link('Select none', () => { shownIds.forEach((id) => selected.delete(id)); saveSelection(); drawSelection(); })
+            : link('Select all', () => startSelecting(true)),
+          link('Done', stopSelecting));
+      }
+      addBtn.hidden = selectMode;
+      const bar = $('#selectBar');
+      bar.hidden = !selectMode;
+      const n = selected.size;
+      $('#selectCount').textContent = n ? n + ' selected' : 'Tap pieces to select them';
+      $('#editSelectedBtn').disabled = !n;
+      $('#editSelectedBtn').textContent = n > 1 ? 'Edit ' + n : 'Edit';
+      const sell = $('#sellSelectedBtn');
+      sell.hidden = !Settings.square().enabled;
+      sell.disabled = !n;
+    }
+    $('#editSelectedBtn').addEventListener('click', () => {
+      if (selected.size === 1) nav('#/edit/' + encodeURIComponent([...selected][0]));
+      else if (selected.size) nav('#/bulk');
+    });
+    $('#sellSelectedBtn').addEventListener('click', () => sellSelected(pieces.filter((p) => selected.has(p.id))));
+    const onEsc = (e) => { if (e.key === 'Escape' && selectMode && !document.querySelector('dialog[open]')) stopSelecting(); };
+    document.addEventListener('keydown', onEsc);
+    window.addEventListener('hashchange', () => document.removeEventListener('keydown', onEsc), { once: true });
 
     // One drop-down per chosen field, listing the values your pieces actually have.
     function drawFieldFilters() {
@@ -786,6 +899,7 @@
     });
 
     searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); drawCards(); });
+    listEl.addEventListener('pointerdown', () => { longPressed = false; }, true); // a long press whose tap never came
     pieceCount = pieces.length;
     drawInstallTip();
     drawChips();
@@ -1257,6 +1371,331 @@
     if (isNew) f.title.focus();
   }
 
+  /* ---------- editing several pieces at once ---------- */
+
+  /** "Mug (3), Bowl (2) and 1 more": the different values of a field, most common first. */
+  function describeValues(values) {
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+    const list = [...counts].sort((a, b) => b[1] - a[1]).map(([v, n]) => (v || 'empty') + ' (' + n + ')');
+    return list.length > 3 ? list.slice(0, 3).join(', ') + ' and ' + (list.length - 3) + ' more' : list.join(', ');
+  }
+
+  /** Load pieces synced from another device (summaries only) so they can be saved. Returns the ones that failed. */
+  async function loadStubs(pieces, onProgress) {
+    const stubs = pieces.filter((p) => p.stub);
+    const failed = [];
+    let done = 0;
+    const queue = [...stubs];
+    const work = async () => {
+      while (queue.length) {
+        const p = queue.shift();
+        try { await loadOnDemand(p.id); } catch (e) { failed.push(p); }
+        done += 1;
+        if (onProgress) onProgress(done, stubs.length);
+      }
+    };
+    await Promise.all([work(), work(), work(), work()]);
+    return failed;
+  }
+
+  async function renderBulkEdit() {
+    const pieces = (await Promise.all([...selected].map((id) => DB.getPiece(id)))).filter((p) => p && !p.deleted);
+    if (pieces.length < 2) {
+      if (pieces.length === 1) return nav('#/edit/' + encodeURIComponent(pieces[0].id), true);
+      return nav('#/', true);
+    }
+    const n = pieces.length;
+    setChrome({ title: 'Edit ' + n + ' pieces', back: true, fab: false });
+    mount('tpl-edit');
+    const form = $('#editForm');
+    const f = form.elements;
+    form.classList.add('bulk-edit');
+    // The title and photos belong to one piece, so they aren't edited here.
+    f.title.closest('.field').remove();
+    $('#photoGrid').closest('.field').remove();
+    form.prepend(el('p', { class: 'muted small' },
+      'Changes apply to all ' + n + ' pieces. Fields you leave alone stay as they are on each piece. Titles and photos are changed one piece at a time.'));
+
+    const touched = new Set();
+    const watch = (box, key) => { const mark = () => touched.add(key); box.addEventListener('input', mark); box.addEventListener('change', mark); };
+    const same = (vals) => vals.every((v) => v === vals[0]);
+    /** A red note under a field whose pieces don't agree. Returns true when they don't. */
+    function conflictNote(box, vals, text) {
+      if (same(vals) && !text) return false;
+      box.append(el('p', { class: 'conflict' }, text || 'Different on these pieces: ' + describeValues(vals) + '. A value you set here replaces it on all ' + n + '.'));
+      return true;
+    }
+    // A drop-down whose pieces differ starts on "Keep each piece's", which changes nothing.
+    const KEEP = '__keep';
+    const keepOption = (sel) => { sel.prepend(el('option', { value: KEEP }, 'Keep each piece’s')); sel.value = KEEP; };
+
+    // Clay bodies.
+    const clayKey = (p) => claysOf(p).map((c) => c.toLowerCase()).sort().join('\n');
+    const clays = same(pieces.map(clayKey)) ? [...claysOf(pieces[0])] : [];
+    const clayPick = tagPicker($('#clayPicker'), clays, 'clay', { onChange: () => touched.add('clays') });
+    conflictNote($('#clayPicker').closest('.field'), pieces.map((p) => claysOf(p).join(', ')));
+
+    // Forming method.
+    const methods = pieces.map((p) => p.method || '');
+    form.querySelectorAll('input[name=method]').forEach((r) => { r.checked = same(methods) && r.value === methods[0]; });
+    const methodBox = form.querySelector('input[name=method]').closest('fieldset');
+    watch(methodBox, 'method');
+    conflictNote(methodBox, methods.map((m) => METHOD_LABEL[m] || m));
+
+    // Bisque and glaze firing.
+    for (const k of ['bisque', 'glaze']) {
+      f[k + 'FiringType'].append(...FIRING_TYPES.map((t) => el('option', null, t)));
+      f[k + 'Cone'].append(...CONES.map((c) => el('option', { value: c }, 'Cone ' + c)));
+    }
+    for (const k of ['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone']) {
+      const vals = pieces.map((p) => firingsOf(p)[k]);
+      const sel = f[k];
+      if (same(vals)) {
+        sel.value = vals[0];
+        if (vals[0] && sel.value !== vals[0]) { sel.append(el('option', null, vals[0])); sel.value = vals[0]; }
+      } else keepOption(sel);
+      watch(sel.closest('.field'), k);
+      conflictNote(sel.closest('.field'), vals.map((v) => (k.endsWith('Cone') ? coneLabel(v) : v)));
+    }
+
+    // Glazes and glazing process. A glazing process sets its pieces' glazes, so while any of these
+    // pieces keeps one, the glazes can only change by choosing a process for all or removing it.
+    const procOf = (p) => (Settings.glazingProcess(p.glazingProcessId) ? p.glazingProcessId : '');
+    const procIds = pieces.map(procOf);
+    const glazeKey = (p) => (p.glazes || []).map((g) => g.toLowerCase()).sort().join('\n');
+    const commonGlazes = same(pieces.map(glazeKey)) ? [...(pieces[0].glazes || [])] : [];
+    const glazes = [...commonGlazes];
+    let procAction = null; // null: keep each piece's; { set: process }; 'remove'
+    const locked = () => (procAction ? procAction !== 'remove' : procIds.some(Boolean));
+    const glazeField = $('#glazePicker').closest('.field');
+    const glazeNote = el('p', { class: 'conflict' });
+    glazeField.append(glazeNote);
+    let redrawing = false; // redraws by the screen itself aren't edits
+    const glazePick = tagPicker($('#glazePicker'), glazes, 'glaze', { locked, onChange: () => { if (!locked() && !redrawing) touched.add('glazes'); } });
+    const redrawGlazes = () => { redrawing = true; glazePick.redraw(); redrawing = false; };
+    function setGlazes(list) { glazes.splice(0, glazes.length, ...list); touched.delete('glazes'); redrawGlazes(); }
+    function drawGlazeNote() {
+      const differ = !same(pieces.map(glazeKey));
+      glazeNote.hidden = !differ || (procAction && procAction !== 'remove');
+      glazeNote.textContent = 'Different on these pieces: ' + describeValues(pieces.map((p) => (p.glazes || []).join(', '))) + '.' +
+        (locked() ? '' : ' Glazes you set here replace them on all ' + n + '.');
+    }
+    function drawProcess() {
+      const box = $('#glazingProcessBox');
+      const parts = [];
+      const btn = (label, cls, run) => el('button', { type: 'button', class: 'btn btn-small ' + cls, onclick: run }, label);
+      const choose = btn(procIds.some(Boolean) || procAction ? 'Choose a glazing process for all…' : 'Choose a glazing process…', 'btn-secondary', async () => {
+        glazePick.flush();
+        const r = await chooseGlazingProcess(glazes, null);
+        if (!r) return;
+        procAction = { set: r };
+        setGlazes(r.glazes);
+        drawProcess();
+      });
+      const undo = btn('Keep each piece’s', 'btn-ghost', () => { procAction = null; setGlazes(commonGlazes); drawProcess(); });
+      const remove = btn(n === 2 ? 'Remove from both' : 'Remove from all ' + n, 'btn-ghost', () => { procAction = 'remove'; setGlazes(commonGlazes); drawProcess(); });
+      const hasProcs = Settings.glazingProcesses().length > 0;
+      if (procAction && procAction.set) {
+        box.replaceChildren(glazingProcessCard(procAction.set, { notes: false }),
+          el('p', { class: 'muted small' }, 'All ' + n + ' pieces get this glazing process and its glazes.'),
+          el('div', { class: 'process-actions' }, hasProcs ? choose : null, btn('Remove glazing process', 'btn-ghost', () => { procAction = 'remove'; setGlazes(commonGlazes); drawProcess(); }), undo));
+      } else if (procAction === 'remove') {
+        box.replaceChildren(el('p', { class: 'muted small' }, procIds.some(Boolean) ? 'The glazing process is removed from these pieces when you save.' : 'No glazing process.'),
+          el('div', { class: 'process-actions' }, hasProcs ? choose : null, procIds.some(Boolean) ? undo : null));
+      } else if (procIds.every(Boolean) && same(procIds)) {
+        box.replaceChildren(glazingProcessCard(Settings.glazingProcess(procIds[0]), { notes: false }),
+          el('div', { class: 'process-actions' }, choose, btn('Remove glazing process', 'btn-ghost', () => { procAction = 'remove'; setGlazes(commonGlazes); drawProcess(); })));
+      } else if (procIds.some(Boolean)) {
+        const using = procIds.filter(Boolean).length;
+        const names = procIds.filter(Boolean).map((id) => Settings.glazingProcess(id).name);
+        box.replaceChildren(
+          el('p', { class: 'conflict' }, using + ' of ' + n + ' pieces ' + (using === 1 ? 'uses' : 'use') + ' a glazing process: ' + describeValues(names) +
+            '. Their glazes stay as they are unless you choose a glazing process for all or remove it.'),
+          el('div', { class: 'process-actions' }, choose, remove));
+      } else {
+        box.replaceChildren(hasProcs ? el('div', { class: 'process-actions' }, choose) : el('p', { class: 'muted small' }, 'No glazing process. Save one from a single piece, or add one in Settings.'));
+      }
+      redrawGlazes();
+      drawGlazeNote();
+    }
+    drawProcess();
+
+    // Stage.
+    $('#stageSeg').replaceChildren(...STAGES.map((s) =>
+      el('label', null, el('input', { type: 'radio', name: 'stage', value: s.id }), el('span', null, s.label))));
+    const stages = pieces.map((p) => p.stage || 'greenware');
+    form.querySelectorAll('input[name=stage]').forEach((r) => { r.checked = same(stages) && r.value === stages[0]; });
+    const stageBox = $('#stageSeg').closest('fieldset');
+    watch(stageBox, 'stage');
+    conflictNote(stageBox, stages.map((s) => STAGE_BY_ID[s] ? STAGE_BY_ID[s].label : s));
+
+    // Dates.
+    for (const k of ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone']) {
+      const vals = pieces.map((p) => p[k] || '');
+      if (same(vals)) f[k].value = vals[0];
+      const box = f[k].closest('label');
+      watch(box, k);
+      conflictNote(box, vals.map(fmtDate));
+    }
+
+    // Custom fields.
+    const customOf = (p, cf) => (p.custom || {})[cf.id];
+    $('#customFields').replaceChildren(...Settings.fields().map((cf) => {
+      const name = 'cf:' + cf.id;
+      const raw = pieces.map((p) => customOf(p, cf));
+      const shown = raw.map((v) => (cf.type === 'yesno' ? (v === true ? 'Yes' : 'No') : cf.type === 'date' ? fmtDate(v) : Settings.format(cf, v)));
+      const agree = same(shown);
+      const v = agree ? raw[0] : undefined;
+      let box;
+      if (cf.type === 'yesno') {
+        const input = el('input', { type: 'checkbox', name, checked: v === true, onchange: (e) => { e.target.nextElementSibling.textContent = e.target.checked ? 'Yes' : 'No'; } });
+        input.indeterminate = !agree;
+        box = el('div', { class: 'field' }, el('span', null, cf.name), el('label', { class: 'yesno' }, input, el('b', null, agree ? (v === true ? 'Yes' : 'No') : 'Mixed')));
+      } else if (cf.type === 'choice') {
+        const opts = [...cf.options];
+        raw.forEach((x) => { if (x && !opts.includes(x)) opts.push(x); });
+        const sel = el('select', { name }, el('option', { value: '' }, '—'), opts.map((o) => el('option', { value: o }, o)));
+        sel.value = agree && v ? v : '';
+        if (!agree) keepOption(sel);
+        box = el('label', { class: 'field' }, el('span', null, cf.name), sel);
+      } else if (cf.type === 'text' && cf.remember) {
+        box = valuePicker(cf, agree && typeof v === 'string' ? v : '', name);
+      } else if (cf.type === 'currency') {
+        const m = agree ? Settings.money(cf, v) : null;
+        const firstCur = raw.map((x) => Settings.money(cf, x)).find(Boolean);
+        const cur = currencySelect(m ? m.currency : firstCur ? firstCur.currency : cf.currency);
+        cur.name = 'cfcur:' + cf.id;
+        cur.setAttribute('aria-label', cf.name + ' currency');
+        cur.classList.add('money-currency');
+        const input = el('input', { name, type: 'number', min: '0', inputmode: 'decimal', 'aria-label': cf.name });
+        const setStep = () => { const d = Settings.minorDigits(cur.value); input.step = d ? String(10 ** -d) : '1'; };
+        cur.addEventListener('change', setStep); setStep();
+        if (m) input.value = m.amount.toFixed(Settings.minorDigits(m.currency));
+        box = el('div', { class: 'field' }, el('span', null, cf.name), el('div', { class: 'money-row' }, input, cur));
+      } else {
+        const type = cf.type === 'number' ? 'number' : cf.type === 'date' ? 'date' : cf.type === 'link' ? 'url' : 'text';
+        const input = el('input', { name, type, maxlength: type === 'url' ? '2000' : type === 'text' ? '200' : null, autocomplete: 'off',
+          step: type === 'number' ? 'any' : null, inputmode: type === 'number' ? 'decimal' : type === 'url' ? 'url' : null, placeholder: type === 'url' ? 'https://' : null });
+        if (agree && v !== undefined && v !== null && v !== '') input.value = String(cf.type === 'number' ? v : v);
+        box = el('label', { class: 'field' }, el('span', null, cf.name), input);
+      }
+      watch(box, 'cf:' + cf.id);
+      conflictNote(box, shown);
+      return box;
+    }));
+
+    // Notes. Pieces synced from another device haven't loaded theirs yet.
+    const notesBox = f.notes.closest('label');
+    const unloaded = pieces.filter((p) => p.stub).length;
+    const notes = pieces.map((p) => p.notes || '');
+    if (!unloaded && same(notes)) f.notes.value = notes[0];
+    f.notes.placeholder = same(notes) && !unloaded ? f.notes.placeholder : 'Leave empty to keep each piece’s notes';
+    watch(notesBox, 'notes');
+    if (unloaded) conflictNote(notesBox, [], 'The notes of ' + unloaded + (unloaded === 1 ? ' piece haven’t' : ' pieces haven’t') + ' been loaded on this device, so they may differ. Notes you type here replace them on all ' + n + '.');
+    else if (!same(notes)) conflictNote(notesBox, [], 'These pieces have different notes. Notes you type here replace them on all ' + n + '.');
+
+    $('#cancelBtn').addEventListener('click', () => backBtn.click());
+
+    const saveBtn = form.querySelector('button[type=submit]');
+    saveBtn.textContent = 'Save ' + n + ' pieces';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clayPick.flush(); glazePick.flush();
+      // What changed, as a function that applies it to one piece.
+      const edits = [];
+      if (touched.has('clays')) { const v = [...clays]; edits.push((p) => { p.clays = [...v]; delete p.clayBody; }); }
+      if (touched.has('method')) { const v = (form.querySelector('input[name=method]:checked') || {}).value || ''; edits.push((p) => { p.method = v; }); }
+      for (const k of ['bisqueFiringType', 'bisqueCone', 'glazeFiringType', 'glazeCone']) {
+        const v = f[k].value;
+        if (!touched.has(k) || v === KEEP) continue;
+        edits.push((p) => { Object.assign(p, firingsOf(p)); delete p.firingType; delete p.cone; p[k] = v; });
+      }
+      if (procAction && procAction.set) {
+        const r = procAction.set;
+        edits.push((p) => { p.glazes = [...r.glazes]; p.glazingProcessId = r.id; });
+      } else {
+        if (procAction === 'remove') edits.push((p) => { delete p.glazingProcessId; });
+        if (touched.has('glazes') && !locked()) { const v = [...glazes]; edits.push((p) => { p.glazes = [...v]; }); }
+      }
+      const dateKeys = ['dateMade', 'dateBisque', 'dateGlazed', 'dateDone'];
+      for (const k of dateKeys) if (touched.has(k)) { const v = f[k].value; edits.push((p) => { p[k] = v; }); }
+      if (touched.has('stage')) {
+        const v = (form.querySelector('input[name=stage]:checked') || {}).value;
+        if (v) {
+          const s = STAGE_BY_ID[v];
+          edits.push((p) => { p.stage = v; if (s && !touched.has(s.date) && !p[s.date]) p[s.date] = today(); }); // as on one piece: fill in that stage's date
+        }
+      }
+      const learned = {};
+      for (const cf of Settings.fields()) {
+        if (!touched.has('cf:' + cf.id)) continue;
+        const input = form.elements['cf:' + cf.id];
+        if (!input || input.value === KEEP) continue;
+        if (cf.type === 'yesno' && input.indeterminate) continue;
+        if (cf.type === 'currency' && !input.value.trim() && !same(pieces.map((p) => Settings.format(cf, customOf(p, cf))))) continue; // only the currency was changed
+        const v = cf.type === 'yesno' ? input.checked
+          : cf.type === 'currency' ? Settings.coerce(cf, { amount: input.value.trim(), currency: form.elements['cfcur:' + cf.id].value })
+            : Settings.coerce(cf, input.value.trim());
+        if (cf.type === 'link' && v === '' && input.value.trim()) { toast('“' + cf.name + '” needs a web address, such as https://…'); input.focus(); return; }
+        if (typeof v === 'string' && v && !pieces.every((p) => customOf(p, cf) === v)) learned[cf.id] = v;
+        edits.push((p) => { p.custom = { ...(p.custom || {}) }; if (v === '') delete p.custom[cf.id]; else p.custom[cf.id] = v; });
+      }
+      if (touched.has('notes') && (f.notes.value.trim() || (same(notes) && !unloaded))) {
+        const v = f.notes.value.trim();
+        edits.push((p) => { p.notes = v; });
+      }
+      if (!edits.length) { toast('Nothing to save: no fields were changed.'); return; }
+
+      saveBtn.disabled = true;
+      let skipped = [];
+      try {
+        // Pieces synced from another device are loaded in full first, so saving them keeps their notes and photos.
+        if (pieces.some((p) => p.stub)) {
+          if (!connected()) {
+            skipped = pieces.filter((p) => p.stub);
+          } else {
+            toast('Loading pieces from Google Drive…', 60000);
+            skipped = await loadStubs(pieces, (done, all) => toast('Loading pieces from Google Drive… ' + done + ' of ' + all, 60000));
+          }
+          if (skipped.length && !(await ask({
+            title: skipped.length === n ? 'These pieces can’t be saved yet' : 'Save the other ' + (n - skipped.length) + ' pieces?',
+            message: [skipped.length + (skipped.length === 1 ? ' piece was' : ' pieces were') + ' synced from another device and ' +
+              (connected() ? 'could not be loaded from Google Drive' : 'need Google Drive to load first') + ': ' +
+              skipped.slice(0, 5).map((p) => p.title || 'Untitled').join(', ') + (skipped.length > 5 ? ' and ' + (skipped.length - 5) + ' more' : '') + '.',
+            connected() ? null : 'Reconnect Google Drive, then try again to change them too.'],
+            confirm: skipped.length === n ? 'OK' : 'Save ' + (n - skipped.length),
+            cancel: skipped.length === n ? null : 'Cancel',
+          }) || skipped.length === n)) { saveBtn.disabled = false; return; }
+        }
+        const skip = new Set(skipped.map((p) => p.id));
+        const now = Date.now();
+        let count = 0;
+        for (const old of pieces) {
+          if (skip.has(old.id)) continue;
+          const p = await DB.getPiece(old.id); // the latest copy, loaded or synced meanwhile
+          if (!p || p.deleted || p.stub) continue;
+          edits.forEach((apply) => apply(p));
+          p.updatedAt = now;
+          await DB.putPiece(p);
+          count += 1;
+        }
+        Settings.learnValues(learned);
+        // New glazes and clays join the drop-downs (one already on these pieces may have been taken off a list on purpose).
+        const had = new Set(pieces.flatMap((p) => [...claysOf(p), ...(p.glazes || [])]).map((v) => v.toLowerCase()));
+        const unlisted = (v) => !had.has(v.toLowerCase());
+        Settings.learn({ glazes: touched.has('glazes') ? glazes.filter(unlisted) : [], clays: touched.has('clays') ? clays.filter(unlisted) : [] });
+        markChanged();
+        clearSelection();
+        toast('Saved ' + count + (count === 1 ? ' piece' : ' pieces') + (!navigator.onLine && connected() ? '. They will sync when you\'re back online.' : ''));
+        if (inAppNavs > 0) history.back(); else nav('#/', true);
+      } catch (err) {
+        saveBtn.disabled = false;
+        toast(err.message || 'Could not save the pieces.', 4000);
+      }
+    });
+  }
+
   /* ---------- Square checkout ---------- */
 
   // "Charge with Square" opens the Square Point of Sale app with the piece's price and a note
@@ -1299,18 +1738,27 @@
     btn.hidden = !Settings.square().enabled || p.stub || !(m && m.amount > 0) || (sold && custom[sold.id] === true);
     if (btn.hidden) return;
     btn.textContent = 'Charge ' + Settings.format(price, m) + ' with Square';
-    btn.onclick = () => startSquareCharge(p, m);
+    btn.onclick = () => startSquareCharge({ id: p.id, note: 'Pottery Log: ' + (p.title || 'Untitled'), link: pieceUrl(p.id), ...m });
   }
 
-  function startSquareCharge(p, { amount, currency }) {
+  const canUseSquare = () => {
+    if (!squareAppId()) { toast('Add your Square application ID in Settings first.', 4000); nav('#/backup'); return false; }
+    if (!isAndroid() && !isIOS()) { toast('Square checkout opens the Square Point of Sale app, so use it on your phone or tablet.', 4500); return false; }
+    return true;
+  };
+
+  /**
+   * Open Square to charge amount in currency. id: the piece, or for a sale of several pieces a
+   * "sale-…" id that stands for pieceIds (kept on this device until Square comes back).
+   */
+  function startSquareCharge({ id, pieceIds, note: text, link, amount, currency }) {
     const appId = squareAppId();
-    if (!appId) { toast('Add your Square application ID in Settings first.', 4000); return nav('#/backup'); }
-    if (!isAndroid() && !isIOS()) { toast('Square checkout opens the Square Point of Sale app, so use it on your phone or tablet.', 4500); return; }
+    if (!canUseSquare()) return;
     const total = Math.round(amount * 10 ** Settings.minorDigits(currency));
-    const note = ('Pottery Log: ' + (p.title || 'Untitled')).slice(0, 200) + ' ' + pieceUrl(p.id);
+    const note = text.slice(0, 200) + ' ' + link;
     const key = relayUrl() ? Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b & 63]).join('') : '';
-    const state = 'pl:' + p.id + (key ? ':' + key : '');
-    store(SQUARE_PENDING_KEY, { pieceId: p.id, key, at: Date.now() });
+    const state = 'pl:' + id + (key ? ':' + key : '');
+    store(SQUARE_PENDING_KEY, { pieceId: id, pieceIds: pieceIds || null, key, at: Date.now() });
     if (isAndroid()) {
       const extra = (k, v) => k + '=' + encodeURIComponent(v) + ';';
       location.href = 'intent:#Intent;action=com.squareup.pos.action.CHARGE;package=com.squareup;' +
@@ -1362,12 +1810,16 @@
     store(SQUARE_PENDING_KEY, null);
     const m = typeof r.state === 'string' && r.state.match(/^pl:([^:]+)/);
     r.pieceId = m ? m[1] : pending && pending.pieceId;
+    if (pending && pending.pieceIds && pending.pieceId === r.pieceId) r.pieceIds = pending.pieceIds;
     if (r.error) r.error = r.error.replace(/^com\.squareup\.pos\.ERROR_/, '');
-    history.replaceState(null, '', location.pathname + (r.pieceId ? '#/piece/' + encodeURIComponent(r.pieceId) : '#/'));
+    const one = r.pieceId && !isSaleId(r.pieceId);
+    history.replaceState(null, '', location.pathname + (one ? '#/piece/' + encodeURIComponent(r.pieceId) : '#/'));
     return r;
   }
 
-  /** Save a finished sale on its piece: Transaction link, and Sold set to Yes. */
+  const isSaleId = (id) => /^sale-/.test(id || '');
+
+  /** Save a finished sale on its piece (or each piece of a sale of several): Transaction link, and Sold set to Yes. */
   async function saveSquareSale(r) {
     if (r.error) {
       const msg = SQUARE_ERRORS[r.error];
@@ -1375,13 +1827,34 @@
       return;
     }
     const url = r.serverId ? squareSaleUrl(r.serverId) : 'https://app.squareup.com/dashboard/sales/transactions';
-    const p = r.pieceId ? await DB.getPiece(r.pieceId) : null;
-    if (!p || p.deleted || p.stub) {
+    const ids = r.pieceIds && r.pieceIds.length ? r.pieceIds : r.pieceId && !isSaleId(r.pieceId) ? [r.pieceId] : [];
+    const several = ids.length > 1 || isSaleId(r.pieceId);
+    const saved = [];
+    const missed = [];
+    for (const id of ids) {
+      let p = await DB.getPiece(id);
+      if (p && !p.deleted && p.stub && connected()) p = await loadOnDemand(id).then(() => DB.getPiece(id)).catch(() => p); // a summary is loaded before it's saved
+      if (!p || p.deleted || p.stub) { if (p && !p.deleted) missed.push(p); continue; }
+      p.custom = { ...(p.custom || {}) };
+      const tx = Settings.squareField('transaction');
+      const sold = Settings.squareField('sold');
+      if (tx) p.custom[tx.id] = url;
+      if (sold) p.custom[sold.id] = true;
+      p.updatedAt = Date.now();
+      await DB.putPiece(p);
+      saved.push(p);
+    }
+    if (saved.length) markChanged();
+    if (!saved.length || missed.length) {
       // E.g. Square opened the browser instead of the home-screen app, which keeps its own pieces.
+      const what = several ? 'these pieces aren\'t' : 'this piece isn\'t';
       const box = el('div', { class: 'square-note', role: 'status' },
-        el('p', null, relayUrl()
-          ? 'The sale went through in Square. Square opened your browser, so switch back to Pottery Log on your home screen: it marks the piece sold there. If it doesn\'t, copy this link into the piece\'s Transaction field.'
-          : 'The sale went through in Square, but this piece isn\'t in this copy of Pottery Log (Square may have opened your browser instead of the home-screen app). Copy the link, then open the piece in Pottery Log, tap Edit and paste it into Transaction.'),
+        el('p', null, missed.length && saved.length
+          ? 'The sale went through in Square and ' + saved.length + ' of ' + ids.length + ' pieces are marked sold. These couldn\'t be loaded from Google Drive: ' +
+            missed.map((p) => p.title || 'Untitled').join(', ') + '. Copy the link, then open each one, tap Edit, set Sold and paste it into Transaction.'
+          : relayUrl() && !missed.length
+            ? 'The sale went through in Square. Square opened your browser, so switch back to Pottery Log on your home screen: it marks ' + (several ? 'the pieces' : 'the piece') + ' sold there. If it doesn\'t, copy this link into the Transaction field.'
+            : 'The sale went through in Square, but ' + what + ' in this copy of Pottery Log' + (missed.length ? ' yet (reconnect Google Drive to load ' + (several ? 'them' : 'it') + ')' : ' (Square may have opened your browser instead of the home-screen app)') + '. Copy the link, then open ' + (several ? 'each piece' : 'the piece') + ' in Pottery Log, tap Edit and paste it into Transaction.'),
         el('div', { class: 'folder-actions' },
           el('button', { type: 'button', class: 'btn btn-primary btn-small', onclick: () => {
             (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => toast('Link copied'), () => toast(url, 8000));
@@ -1389,18 +1862,65 @@
           el('a', { class: 'btn btn-ghost btn-small', href: url, target: '_blank', rel: 'noopener' }, 'Open in Square'),
           el('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => box.remove() }, 'Close')));
       document.body.append(box);
+      if (!saved.length) return;
+    }
+    if (several) clearSelection();
+    const which = several ? saved.length + ' pieces are marked sold' : 'this piece is marked sold';
+    if (!missed.length) toast(r.serverId ? 'Sold! ' + (several ? 'The Square transaction is saved on all ' + saved.length + ' pieces.' : 'The Square transaction is saved on this piece.')
+      : 'Sold! ' + which[0].toUpperCase() + which.slice(1) + '. Square was offline, so the transaction link will open your Square sales list.', 4000);
+    if (location.hash === '#/piece/' + encodeURIComponent(saved[0].id) || (several && (location.hash === '#/' || location.hash === ''))) route();
+  }
+
+  /** "Sell with Square" for the selected pieces: one charge for their prices added up. */
+  async function sellSelected(chosen) {
+    if (!chosen.length || !canUseSquare()) return;
+    const price = Settings.squareField('price');
+    const sold = Settings.squareField('sold');
+    const priced = [];
+    const noPrice = [];
+    const already = [];
+    for (const p of chosen) {
+      const c = p.custom || {};
+      const m = price && price.type === 'currency' ? Settings.money(price, c[price.id]) : null;
+      if (sold && c[sold.id] === true) already.push(p);
+      else if (!(m && m.amount > 0)) noPrice.push(p);
+      else priced.push({ p, m });
+    }
+    const names = (list) => list.slice(0, 5).map((p) => p.title || 'Untitled').join(', ') + (list.length > 5 ? ' and ' + (list.length - 5) + ' more' : '');
+    const skippedText = [
+      noPrice.length ? (noPrice.length === 1 ? '1 piece has' : noPrice.length + ' pieces have') + ' no price and ' + (noPrice.length === 1 ? 'isn\'t' : 'aren\'t') + ' included: ' + names(noPrice) + '.' : null,
+      already.length ? (already.length === 1 ? '1 piece is' : already.length + ' pieces are') + ' already sold and ' + (already.length === 1 ? 'isn\'t' : 'aren\'t') + ' included: ' + names(already) + '.' : null,
+    ];
+    if (!priced.length) {
+      await ask({ title: 'Nothing to charge', message: skippedText.filter(Boolean).length ? skippedText : 'Add a price to these pieces first.', cancel: null });
       return;
     }
-    p.custom = { ...(p.custom || {}) };
-    const tx = Settings.squareField('transaction');
-    const sold = Settings.squareField('sold');
-    if (tx) p.custom[tx.id] = url;
-    if (sold) p.custom[sold.id] = true;
-    p.updatedAt = Date.now();
-    await DB.putPiece(p);
-    markChanged();
-    toast(r.serverId ? 'Sold! The Square transaction is saved on this piece.' : 'Sold! Square was offline, so the transaction link will open your Square sales list.', 4000);
-    if (location.hash === '#/piece/' + encodeURIComponent(p.id)) route();
+    const currencies = [...new Set(priced.map((x) => x.m.currency))];
+    if (currencies.length > 1) {
+      await ask({ title: 'Prices are in different currencies', message: ['Square charges one currency at a time. These pieces are priced in ' + currencies.join(' and ') + '.', 'Select pieces priced in one currency, or change their prices first.'], cancel: null });
+      return;
+    }
+    const currency = currencies[0];
+    const k = 10 ** Settings.minorDigits(currency);
+    const amount = Math.round(priced.reduce((sum, x) => sum + Math.round(x.m.amount * k), 0)) / k;
+    const totalText = Settings.format(price, { amount, currency });
+    const list = el('ul', { class: 'sale-list' }, priced.map(({ p, m }) => el('li', null, el('span', null, p.title || 'Untitled'), el('span', null, Settings.format(price, m)))),
+      el('li', { class: 'sale-total' }, el('span', null, 'Total'), el('span', null, totalText)));
+    const ok = await ask({
+      title: priced.length === 1 ? 'Charge ' + totalText + ' with Square?' : 'Charge ' + totalText + ' for ' + priced.length + ' pieces?',
+      message: [list, priced.length > 1 ? 'This is one sale in Square. When it\'s done, each piece is marked sold with a link to the transaction.' : null, ...skippedText],
+      confirm: 'Charge ' + totalText,
+    });
+    if (!ok) return;
+    if (priced.length === 1) {
+      const { p, m } = priced[0];
+      startSquareCharge({ id: p.id, note: 'Pottery Log: ' + (p.title || 'Untitled'), link: pieceUrl(p.id), ...m });
+      return;
+    }
+    const titles = priced.map(({ p }) => p.title || 'Untitled');
+    let note = 'Pottery Log, ' + priced.length + ' pieces: ' + titles.join(', ');
+    if (note.length > 200) note = note.slice(0, 198) + '…';
+    startSquareCharge({ id: 'sale-' + DB.uid(), pieceIds: priced.map(({ p }) => p.id), note, link: appUrl(), amount, currency });
   }
 
   /** A sale started here whose result went to the Worker (e.g. Square came back in Safari):
@@ -1419,7 +1939,7 @@
       if (!res.ok) return;
       const r = await res.json();
       store(SQUARE_PENDING_KEY, null);
-      await saveSquareSale({ ...r, pieceId: r.pieceId || pending.pieceId });
+      await saveSquareSale({ ...r, pieceId: r.pieceId || pending.pieceId, pieceIds: pending.pieceIds || null });
     } catch (e) { /* offline: try again next time */ } finally { relayBusy = false; }
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSquareRelay(); });

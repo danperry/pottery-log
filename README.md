@@ -273,6 +273,14 @@ One-time setup (free):
 
 The price's currency must match your Square account's currency. On iPhone, Square returns to the callback URL in Safari, which keeps its pieces apart from a home-screen copy of the app. That's why the callback goes through the Worker: it keeps the result, and when you switch back to Pottery Log on your home screen, the app fetches it and marks the piece sold. Safari shows a short note saying so, with the transaction link as a fallback. On Android, Chrome and the installed app share their pieces, so the sale is saved straight away. If Square was offline (cash, offline mode), there's no transaction ID yet, so the link opens your Square sales list.
 
+### Selecting and editing several pieces
+
+Press and hold a piece, or tap **Select** or **Select all** above the list, to start selecting. Each piece gets a check box; tap pieces to select them, and **Done** to stop. **Select all** picks the pieces the current filters and search show.
+
+**Edit** opens one form for all the selected pieces. A field the pieces agree on shows its value; where they differ, a red note under the field lists their values. Only the fields you change are saved, and a change replaces that field on every selected piece, even where they differed. Titles and photos aren't edited here. Glazing processes still set their pieces' glazes: to change the glazes of pieces that use one, choose a glazing process for all of them or remove it. Pieces synced from another device are loaded from Google Drive before they're saved.
+
+With Square on, **Sell with Square** charges the selected pieces as one sale for their prices added up (pieces without a price, or already sold, are left out, and all prices must be in one currency). When the sale is done, each piece is marked Sold with the same transaction link.
+
 ### Conflicts: merged field by field
 
 Every save records when it happened (`savedAt`), and each device remembers what a piece looked like the last time it matched Drive. If the same piece was changed on two devices before they synced, the next sync combines them field by field: a field changed on only one device keeps that change, so editing the notes on your phone and marking it sold on your laptop keeps both. Photos added on either device are kept, and photos removed on either device are removed.
