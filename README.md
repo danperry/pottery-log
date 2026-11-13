@@ -20,7 +20,7 @@ js/config.js             Worker URL, Google client ID and API key go here
 js/db.js                 IndexedDB storage (pieces, photos, thumbnails, encrypted sign-in)
 js/photo-cache.js        Keeps photos under the storage limit (removes old ones that are safe in Drive)
 js/drive.js              Google sign-in (via the Worker) and Drive API calls
-js/settings.js           Custom fields, filter choices and the glaze and clay lists (synced in the index)
+js/settings.js           Custom fields, filter choices, glaze and clay lists and glaze recipes (synced in the index)
 js/sync.js               Two-way sync with the Drive folder (one folder per piece)
 js/app.js                Views, routing, photo handling, sync triggers
 sw.js                    Service worker (offline app shell)
@@ -223,6 +223,18 @@ The first time the app opens after this update, it fills the lists from the glaz
 ```json
 "settings": { "glazes": ["Celadon", "Shino"], "clays": [{ "name": "B-Mix" }], … }
 ```
+
+### Glaze recipes
+
+A recipe is a set of glazes plus notes on how you apply them. On the edit form, **Recipe** (optional) sits right after Glazes:
+
+- With two or more glazes on a piece, tap **Save glazes as a recipe**, give it a name and notes. The recipe is created when you save the piece.
+- **Choose a recipe…** lists your recipes with a thumbnail. Applying one sets the piece's glazes to the recipe's; if the piece already had different glazes, you're asked first.
+- While a recipe is applied, the glazes are locked. Tap **Remove recipe** to change them again.
+
+Under **Settings → Glaze recipes** you can change a recipe's name, notes and thumbnail, and add new recipes. The thumbnail defaults to the last photo of the piece the recipe was saved from; **Choose thumbnail** shows the photos of every piece that uses the recipe (they load as you scroll). A recipe's glazes can't be changed, since that would rewrite what was done to existing pieces. A recipe no piece uses can be removed.
+
+Recipes are stored under `"settings"` → `"recipes"` in `pottery-log-index.json`. Unlike the other settings they're merged one by one, so a recipe saved on one device is never lost to a newer settings save from another. A piece using one has `"recipe"` (its name) and `"recipeId"` in `piece.json`.
 
 The edit form has a **Bisque** section and a **Glaze** section, each with its own Firing type and Cone. They're saved separately as `"bisqueFiring"` and `"glazeFiring"`. A piece saved before this change had one `"firing"`; it's read as the glaze firing.
 
