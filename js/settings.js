@@ -14,7 +14,8 @@
  *     recipes: [{ id, name, glazes: [..],         glaze recipes: a set of glazes and how they were applied.
  *                 notes, pieceId?, thumb?,         pieceId: the piece it was saved from (its last photo is the default
  *                 createdAt, updatedAt }],           thumbnail); thumb: { pieceId, photoId, fileId? } picked in Settings.
- *                                                  The glazes never change once saved. A removed recipe stays as
+ *                                                  Changing the glazes also changes them on the pieces using it
+ *                                                  (the app asks first). A removed recipe stays as
  *                                                  { id, deleted: true, updatedAt } so other devices remove it too.
  *                                                  Recipes are merged one by one when syncing, so one made on
  *                                                  another device is never lost to a newer settings save.
@@ -594,16 +595,22 @@
       this.learn({ glazes: list });
       return r;
     },
-    /** Change a recipe's name, notes or thumbnail (thumb null: back to the default). Never its glazes. */
+    /** Change a recipe's name, notes, glazes or thumbnail (thumb null: back to the default).
+     * The app updates the pieces using it when the glazes change. */
     editRecipe(id, changes) {
       const old = this.recipe(id);
       if (!old) throw new Error('That recipe no longer exists');
       const next = { ...old, updatedAt: Date.now() };
       if ('name' in changes) next.name = this.checkRecipeName(changes.name, id);
       if ('notes' in changes) next.notes = changes.notes;
+      if ('glazes' in changes) {
+        next.glazes = cleanList(changes.glazes);
+        if (!next.glazes.length) throw new Error('Add at least one glaze');
+      }
       if ('thumb' in changes) { if (changes.thumb) next.thumb = changes.thumb; else delete next.thumb; }
       const r = normalizeRecipe(next);
       this.update({ recipes: load().recipes.map((x) => (x.id === id ? r : x)) });
+      if (changes.glazes) this.learn({ glazes: r.glazes });
       return r;
     },
     removeRecipe(id) {

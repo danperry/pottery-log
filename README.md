@@ -232,7 +232,7 @@ A recipe is a set of glazes plus notes on how you apply them. On the edit form, 
 - **Choose a recipe…** lists your recipes with a thumbnail. Applying one sets the piece's glazes to the recipe's; if the piece already had different glazes, you're asked first.
 - While a recipe is applied, the glazes are locked. Tap **Remove recipe** to change them again.
 
-Under **Settings → Glaze recipes** you can change a recipe's name, notes and thumbnail, and add new recipes. The thumbnail defaults to the last photo of the piece the recipe was saved from; **Choose thumbnail** shows the photos of every piece that uses the recipe (they load as you scroll). A recipe's glazes can't be changed, since that would rewrite what was done to existing pieces. A recipe no piece uses can be removed.
+Under **Settings → Glaze recipes** you can change a recipe's name, notes, glazes and thumbnail, and add new recipes. The thumbnail defaults to the last photo of the piece the recipe was saved from; **Choose thumbnail** shows the photos of every piece that uses the recipe (they load as you scroll). A recipe's glazes can be edited freely while no piece uses it. Once pieces use it, **Change glazes** first says how many pieces will be updated; saving then changes the glazes on all of them (pieces synced from another device are loaded from Drive first, so this needs a connection). A recipe no piece uses can be removed.
 
 Recipes are stored under `"settings"` → `"recipes"` in `pottery-log-index.json`. Unlike the other settings they're merged one by one, so a recipe saved on one device is never lost to a newer settings save from another. A piece using one has `"recipe"` (its name) and `"recipeId"` in `piece.json`.
 
