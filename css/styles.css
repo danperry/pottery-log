@@ -480,3 +480,39 @@ button.process-card.match { box-shadow: inset 4px 0 0 var(--accent); }
 .photo-pick .default-pick[aria-pressed="true"] { outline: 2px solid var(--accent); }
 .process-fact { display: flex; gap: 10px; align-items: flex-start; }
 .photo-pick p:empty { display: none; }
+
+/* Selecting several pieces */
+.count-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.select-links { display: flex; gap: 16px; }
+.link-btn { background: none; border: 0; padding: 8px 2px; color: var(--accent); font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; }
+.card { position: relative; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.card .check {
+  position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0, 0, 0, .25); box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
+  display: none; place-items: center; color: #fff;
+}
+.card .check svg { width: 16px; height: 16px; stroke-width: 3; opacity: 0; }
+.selecting .card .check { display: grid; }
+.card.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.card.selected .check { background: var(--accent); border-color: var(--accent); }
+.card.selected .check svg { opacity: 1; }
+.card.selected .thumb { opacity: .85; }
+.selecting main, main:has(.selecting) { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+.select-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 14px rgba(60, 40, 20, .08);
+}
+.select-bar[hidden] { display: none; }
+.select-count { font-weight: 600; font-size: .95rem; }
+.select-actions { display: flex; gap: 8px; }
+.select-actions .btn-square { width: auto; margin: 0; }
+.selecting ~ .toast, body:has(.select-bar:not([hidden])) .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+/* Editing several pieces */
+.conflict { color: var(--danger); font-size: .85rem; margin: 2px 0 0; }
+.conflict[hidden] { display: none; }
+.sale-list { list-style: none; margin: 8px 0; padding: 0; max-height: 40vh; overflow: auto; }
+.sale-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.sale-list .sale-total { font-weight: 700; border-bottom: 0; }

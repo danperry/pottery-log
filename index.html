@@ -66,8 +66,18 @@
           </div>
         </form>
       </dialog>
-      <p class="count" id="countLabel"></p>
+      <div class="count-row">
+        <p class="count" id="countLabel"></p>
+        <div class="select-links" id="selectLinks"></div>
+      </div>
       <ul class="cards" id="cardList"></ul>
+      <div class="select-bar" id="selectBar" hidden>
+        <span class="select-count" id="selectCount"></span>
+        <div class="select-actions">
+          <button type="button" class="btn btn-square btn-small" id="sellSelectedBtn" hidden>Sell with Square</button>
+          <button type="button" class="btn btn-primary btn-small" id="editSelectedBtn">Edit</button>
+        </div>
+      </div>
       <div class="empty" id="emptyState" hidden>
         <div class="empty-pot" aria-hidden="true">
           <svg viewBox="0 0 64 64"><path d="M22 10h20M24 10c0 6-10 10-10 24 0 12 8 20 18 20s18-8 18-20c0-14-10-18-10-24" /></svg>
