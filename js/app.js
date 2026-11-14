@@ -316,6 +316,13 @@
       window.matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
   }
 
+  // Android's picker shows only the gallery for a multi-select image input (iPhone's also
+  // offers the camera), so Android gets a separate "Take photo" button that opens the camera.
+  function showCameraButtons(root) {
+    if (phoneKind() !== 'android') return;
+    root.querySelectorAll('.camera-only').forEach((b) => { b.hidden = false; });
+  }
+
   function phoneKind() {
     const ua = navigator.userAgent;
     // iPadOS reports itself as a Mac, so also check for touch.
@@ -980,7 +987,8 @@
     // Add photos straight from the piece view (saved and synced like an edit).
     if (!p.stub) {
       $('#galleryAdd').hidden = false;
-      $('#detailPhotoInput').addEventListener('change', async (e) => {
+      showCameraButtons($('#galleryAdd'));
+      const onDetailPhotos = async (e) => {
         const files = [...e.target.files];
         e.target.value = '';
         if (!files.length) return;
@@ -1006,7 +1014,9 @@
         PhotoCache.check();
         toast(added.length === 1 ? 'Photo added' : added.length + ' photos added');
         if (location.hash === here) { showLastPhoto = true; route(); }
-      });
+      };
+      $('#detailPhotoInput').addEventListener('change', onDetailPhotos);
+      $('#detailCameraInput').addEventListener('change', onDetailPhotos);
     }
 
     $('#dTitle').textContent = p.title || 'Untitled';
@@ -1291,7 +1301,8 @@
       }));
       grid.replaceChildren(...items);
     }
-    $('#photoInput').addEventListener('change', async (e) => {
+    showCameraButtons(form);
+    const onPhotos = async (e) => {
       const files = [...e.target.files];
       e.target.value = '';
       for (const file of files) {
@@ -1308,7 +1319,9 @@
         }
       }
       drawPhotos();
-    });
+    };
+    $('#photoInput').addEventListener('change', onPhotos);
+    $('#cameraInput').addEventListener('change', onPhotos);
     drawPhotos();
 
     // Cleanup of unsaved new photos when leaving without saving.
