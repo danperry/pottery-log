@@ -208,7 +208,7 @@ main {
 .gallery-nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
-.gallery-add { display: flex; justify-content: center; padding: 10px 16px 0; }
+.gallery-add { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px 0; }
 .gallery-dots { display: flex; justify-content: center; gap: 6px; padding: 8px 0 0; }
 .gallery-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
 .gallery-dots span.on { background: var(--accent); }
@@ -273,7 +273,8 @@ fieldset.field > legend { margin-bottom: 6px; }
 .photo-item .remove svg { width: 16px; height: 16px; }
 .photo-item .cover { position: absolute; left: 4px; bottom: 4px; font-size: .7rem; background: rgba(0,0,0,.6); color: #fff; padding: 1px 6px; border-radius: 6px; }
 .photo-item.pending { display: grid; place-items: center; color: var(--muted); font-size: .8rem; }
-.photo-add { justify-self: start; cursor: pointer; }
+.photo-add { justify-self: start; display: flex; flex-wrap: wrap; gap: 8px; }
+.photo-add .btn { cursor: pointer; }
 
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tags:empty { display: none; }

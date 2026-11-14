@@ -103,6 +103,10 @@
           <input type="file" accept="image/*" multiple id="detailPhotoInput" hidden>
           Add photos
         </label>
+        <label class="btn btn-secondary btn-small camera-only" hidden>
+          <input type="file" accept="image/*" capture="environment" id="detailCameraInput" hidden>
+          Take photo
+        </label>
       </div>
       <div class="detail-body">
         <div class="detail-head">
@@ -136,10 +140,16 @@
         <span>Photos</span>
         <div class="photo-grid" id="photoGrid"></div>
         <p class="muted small" id="thumbHint" hidden>Tap a photo to use it as the thumbnail in your list.</p>
-        <label class="btn btn-secondary btn-small photo-add">
-          <input type="file" accept="image/*" multiple id="photoInput" hidden>
-          Add photos
-        </label>
+        <div class="photo-add">
+          <label class="btn btn-secondary btn-small">
+            <input type="file" accept="image/*" multiple id="photoInput" hidden>
+            Add photos
+          </label>
+          <label class="btn btn-secondary btn-small camera-only" hidden>
+            <input type="file" accept="image/*" capture="environment" id="cameraInput" hidden>
+            Take photo
+          </label>
+        </div>
       </div>
 
       <div class="field">
